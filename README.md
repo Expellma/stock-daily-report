@@ -13,11 +13,34 @@
 
 ## 快速开始
 
+### macOS / Linux
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 stock-daily-report run --config config/settings.toml
+```
+
+### Windows（Git Bash / MSYS2 / Cygwin / WSL）
+
+Windows 下直接执行 `source .venv/bin/activate` 经常会因为虚拟环境目录为 `.venv/Scripts/` 而失败。推荐使用仓库内置脚本自动创建/复用虚拟环境、选择正确的 Python 路径，并直接以模块方式运行命令：
+
+```bash
+sh scripts/windows_run.sh run
+```
+
+常用示例：
+
+```bash
+sh scripts/windows_run.sh fisher NVDA --thesis "AI accelerator demand"
+sh scripts/windows_run.sh scheduler
+```
+
+如需额外生成 `stock-daily-report` 控制台命令，可显式安装项目；脚本会使用 `--no-build-isolation`，减少 Windows/代理环境下联网拉取构建依赖导致的失败：
+
+```bash
+INSTALL_PROJECT=1 sh scripts/windows_run.sh run
 ```
 
 生成结果：

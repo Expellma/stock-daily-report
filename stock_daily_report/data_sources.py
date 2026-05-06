@@ -100,7 +100,8 @@ def fetch_earnings(symbol: str, app_config: AppConfig) -> EarningsEvent:
     try:
         raw = _get_text(f"{NASDAQ_EARNINGS_URL}?{query}", app_config)
         payload = json.loads(raw)
-        rows = payload.get("data", {}).get("rows", []) or []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        rows = data.get("rows", []) if isinstance(data, dict) else []
         if not rows:
             return EarningsEvent(symbol=symbol)
         row = rows[0]

@@ -9,7 +9,7 @@ finish and leave an auditable JSON artifact.
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import json
 from pathlib import Path
@@ -20,13 +20,31 @@ from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 from .config import AppConfig
-from .models import CompanyProfile, EarningsEvent, FundamentalMetric, FundamentalSnapshot, NewsItem, Quote, Security
+from .models import CompanyProfile, EarningsEvent, FundamentalMetric, FundamentalSnapshot, NewsItem, Quote, SecFactPoint, SecFiling, SecFundamentalData, Security
 
 
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
 YAHOO_RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
 NASDAQ_EARNINGS_URL = "https://api.nasdaq.com/api/calendar/earnings"
 YAHOO_QUOTE_SUMMARY_URL = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules={modules}"
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SEC_COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+SEC_ARCHIVES_DOC_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
+
+SEC_FACT_TAGS: dict[str, tuple[str, ...]] = {
+    "收入": ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"),
+    "毛利润": ("GrossProfit",),
+    "营业利润": ("OperatingIncomeLoss",),
+    "净利润": ("NetIncomeLoss",),
+    "稀释 EPS": ("EarningsPerShareDiluted",),
+    "经营现金流": ("NetCashProvidedByUsedInOperatingActivities",),
+    "资本开支": ("PaymentsToAcquirePropertyPlantAndEquipment",),
+    "研发费用": ("ResearchAndDevelopmentExpense",),
+    "总资产": ("Assets",),
+    "总负债": ("Liabilities",),
+    "股东权益": ("StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+}
 
 
 def read_securities(path: Path, include_thesis: bool = True) -> list[Security]:
@@ -273,3 +291,139 @@ def _strip_html(value: object) -> str | None:
     if value is None:
         return None
     return re.sub(r"<[^>]+>", "", str(value)).strip() or None
+
+
+def fetch_sec_fundamentals(symbol: str, app_config: AppConfig, lookback_days: int = 365) -> SecFundamentalData:
+    """Fetch the last year of SEC EDGAR filings and XBRL facts for a ticker.
+
+    Data is sourced from the same EDGAR corpus exposed by https://www.sec.gov/edgar/search:
+    company submissions identify recent 10-K/10-Q filings, while companyfacts
+    supplies the standardized financial statement datapoints used for charts.
+    """
+
+    normalized_symbol = symbol.strip().upper()
+    try:
+        cik = _lookup_sec_cik(normalized_symbol, app_config)
+        if not cik:
+            return SecFundamentalData(symbol=normalized_symbol, error="SEC CIK not found for ticker")
+        submissions = json.loads(_get_text(SEC_SUBMISSIONS_URL.format(cik=cik), app_config))
+        filings = _parse_recent_sec_filings(cik, submissions, lookback_days)
+        facts_payload = json.loads(_get_text(SEC_COMPANY_FACTS_URL.format(cik=cik), app_config))
+        facts = _parse_recent_sec_facts(facts_payload, lookback_days)
+        if not filings and not facts:
+            return SecFundamentalData(symbol=normalized_symbol, cik=cik, error="no 10-K/10-Q filings or facts found in the last year")
+        return SecFundamentalData(symbol=normalized_symbol, cik=cik, filings=filings, facts=facts)
+    except (ValueError, TypeError, KeyError, URLError, HTTPError) as exc:
+        return SecFundamentalData(symbol=normalized_symbol, error=str(exc))
+
+
+def _lookup_sec_cik(symbol: str, app_config: AppConfig) -> str | None:
+    payload = json.loads(_get_text(SEC_TICKERS_URL, app_config))
+    for company in payload.values() if isinstance(payload, dict) else []:
+        if isinstance(company, dict) and str(company.get("ticker", "")).upper() == symbol:
+            return str(company.get("cik_str", "")).zfill(10)
+    return None
+
+
+def _parse_recent_sec_filings(cik: str, submissions: dict, lookback_days: int) -> list[SecFiling]:
+    recent = submissions.get("filings", {}).get("recent", {}) if isinstance(submissions, dict) else {}
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=lookback_days)
+    filings: list[SecFiling] = []
+    for index, form in enumerate(recent.get("form", [])):
+        if form not in {"10-K", "10-Q"}:
+            continue
+        filing_date = _recent_value(recent, "filingDate", index)
+        report_date = _recent_value(recent, "reportDate", index)
+        if not _is_recent_iso_date(filing_date or report_date, cutoff):
+            continue
+        accession = _recent_value(recent, "accessionNumber", index)
+        document = _recent_value(recent, "primaryDocument", index)
+        if not accession or not document:
+            continue
+        accession_path = accession.replace("-", "")
+        cik_path = str(int(cik))
+        url = SEC_ARCHIVES_DOC_URL.format(cik=cik_path, accession=accession_path, document=document)
+        filings.append(
+            SecFiling(
+                form=form,
+                filing_date=filing_date or "",
+                report_date=report_date or "",
+                accession_number=accession,
+                primary_document=document,
+                description=_recent_value(recent, "primaryDocDescription", index) or "",
+                url=url,
+            )
+        )
+    return sorted(filings, key=lambda filing: filing.filing_date, reverse=True)
+
+
+def _parse_recent_sec_facts(payload: dict, lookback_days: int) -> dict[str, list[SecFactPoint]]:
+    us_gaap = payload.get("facts", {}).get("us-gaap", {}) if isinstance(payload, dict) else {}
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=lookback_days)
+    facts: dict[str, list[SecFactPoint]] = {}
+    for label, tags in SEC_FACT_TAGS.items():
+        points: list[SecFactPoint] = []
+        for tag in tags:
+            tag_payload = us_gaap.get(tag)
+            if not isinstance(tag_payload, dict):
+                continue
+            for unit, values in tag_payload.get("units", {}).items():
+                if unit not in {"USD", "USD/shares"}:
+                    continue
+                for item in values:
+                    if item.get("form") not in {"10-K", "10-Q"}:
+                        continue
+                    end_date = str(item.get("end", ""))
+                    filed_date = str(item.get("filed", ""))
+                    if not _is_recent_iso_date(end_date or filed_date, cutoff):
+                        continue
+                    value = _to_float(item.get("val"))
+                    if value is None:
+                        continue
+                    points.append(
+                        SecFactPoint(
+                            label=label,
+                            tag=tag,
+                            fiscal_period=str(item.get("fp", "")),
+                            fiscal_year=_int_or_none(item.get("fy")),
+                            end_date=end_date,
+                            filed_date=filed_date,
+                            form=str(item.get("form", "")),
+                            value=value,
+                            unit=unit,
+                        )
+                    )
+            if points:
+                break
+        if points:
+            facts[label] = _dedupe_fact_points(points)[:6]
+    return facts
+
+
+def _dedupe_fact_points(points: list[SecFactPoint]) -> list[SecFactPoint]:
+    unique: dict[tuple[str, str, str], SecFactPoint] = {}
+    for point in sorted(points, key=lambda item: (item.end_date, item.filed_date), reverse=True):
+        key = (point.end_date, point.fiscal_period, point.form)
+        unique.setdefault(key, point)
+    return sorted(unique.values(), key=lambda item: item.end_date, reverse=True)
+
+
+def _recent_value(recent: dict, key: str, index: int) -> str:
+    values = recent.get(key, [])
+    if isinstance(values, list) and index < len(values):
+        return str(values[index] or "")
+    return ""
+
+
+def _is_recent_iso_date(value: str, cutoff) -> bool:
+    try:
+        return datetime.fromisoformat(value).date() >= cutoff
+    except ValueError:
+        return False
+
+
+def _int_or_none(value: object) -> int | None:
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None

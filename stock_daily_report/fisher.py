@@ -8,8 +8,8 @@ import re
 import textwrap
 
 from .config import Settings
-from .data_sources import fetch_company_profile, fetch_earnings, fetch_fundamentals, fetch_news, fetch_quote
-from .models import FisherAnalysis, FisherCriterion, FundamentalMetric, NewsItem, Security
+from .data_sources import fetch_company_profile, fetch_earnings, fetch_fundamentals, fetch_news, fetch_quote, fetch_sec_fundamentals
+from .models import FisherAnalysis, FisherCriterion, FundamentalMetric, NewsItem, SecFactPoint, SecFundamentalData, Security
 from .report import output_dir_for
 
 FISHER_FRAMEWORK: tuple[tuple[str, str], ...] = (
@@ -40,6 +40,7 @@ def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = No
     profile = fetch_company_profile(normalized_symbol, settings.app)
     fundamentals = fetch_fundamentals(normalized_symbol, settings.app)
     earnings = fetch_earnings(normalized_symbol, settings.app)
+    sec_data = fetch_sec_fundamentals(normalized_symbol, settings.app)
     news = fetch_news(normalized_symbol, settings.app, settings.signals.major_keywords, settings.app.max_watchlist_news)
 
     if quote.error:
@@ -50,6 +51,8 @@ def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = No
         errors.append(f"{normalized_symbol} fundamentals: {fundamentals.error}")
     if earnings.error:
         errors.append(f"{normalized_symbol} earnings: {earnings.error}")
+    if sec_data.error:
+        errors.append(f"{normalized_symbol} SEC EDGAR: {sec_data.error}")
     errors.extend(f"{item.symbol} news: {item.title}" for item in news if item.score < 0)
 
     security = Security(symbol=normalized_symbol, name=name or profile.name or normalized_symbol, thesis=thesis)
@@ -62,8 +65,9 @@ def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = No
         fundamentals=fundamentals,
         news=clean_news,
         earnings=earnings,
-        criteria=_score_fisher_criteria(profile.summary, fundamentals.metrics, clean_news),
+        criteria=_score_fisher_criteria(profile.summary, fundamentals.metrics, clean_news, sec_data),
         errors=errors,
+        sec_data=sec_data,
     )
 
 
@@ -88,7 +92,7 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
     sections = [
         f"# {analysis.security.name}（{analysis.security.symbol}）费雪成长投资基本面分析",
         "",
-        f"> 生成时间：{analysis.generated_at.isoformat()} · 框架：Philip Fisher 15 个成长股问题 · 输出：Markdown",
+        f"> 生成时间：{analysis.generated_at.isoformat()} · 框架：Philip Fisher 15 个成长股问题 · SEC 近一年 10-K/10-Q 财报",
         "",
         "## 🧭 一页结论",
         "",
@@ -104,6 +108,14 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
         "## 📊 关键基本面仪表盘",
         "",
         _metrics_table(analysis.fundamentals.metrics),
+        "",
+        "## 🏛️ SEC EDGAR 近一年财报数据",
+        "",
+        _sec_filings_table(analysis.sec_data),
+        "",
+        "### 📈 关键数据图标",
+        "",
+        _sec_key_data_panel(analysis.sec_data),
         "",
         "## 🐟 费雪 15 问逐项检查",
         "",
@@ -125,23 +137,30 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
     return "\n".join(sections)
 
 
-def _score_fisher_criteria(summary: str, metrics: list[FundamentalMetric], news: list[NewsItem]) -> list[FisherCriterion]:
+def _score_fisher_criteria(summary: str, metrics: list[FundamentalMetric], news: list[NewsItem], sec_data: SecFundamentalData | None = None) -> list[FisherCriterion]:
     metric_status = {metric.label: metric.status for metric in metrics}
     evidence_text = " ".join([summary, *[item.title for item in news]]).lower()
+    sec_change = _sec_change_map(sec_data)
     criteria: list[FisherCriterion] = []
     for index, (title, question) in enumerate(FISHER_FRAMEWORK, start=1):
         score = 3
         evidence: list[str] = []
         if index in {1, 4}:
             score += _status_points(metric_status.get("收入增长"))
+            score += _change_points(sec_change.get("收入"))
             evidence.append(_metric_sentence(metrics, "收入增长"))
+            evidence.append(_sec_change_sentence(sec_data, "收入"))
         if index in {5, 6, 10}:
             for label in ("毛利率", "营业利润率", "净利率"):
                 score += _status_points(metric_status.get(label))
                 evidence.append(_metric_sentence(metrics, label))
+            for sec_label in ("毛利润", "营业利润", "净利润"):
+                score += _change_points(sec_change.get(sec_label))
+                evidence.append(_sec_change_sentence(sec_data, sec_label))
         if index == 13:
             score += _status_points(metric_status.get("自由现金流")) + _status_points(metric_status.get("负债/权益"))
-            evidence.extend([_metric_sentence(metrics, "自由现金流"), _metric_sentence(metrics, "负债/权益")])
+            score += _change_points(sec_change.get("经营现金流"))
+            evidence.extend([_metric_sentence(metrics, "自由现金流"), _metric_sentence(metrics, "负债/权益"), _sec_change_sentence(sec_data, "经营现金流")])
         if index in {2, 3, 11, 12} and re.search(r"\b(ai|cloud|chip|platform|patent|launch|partnership|r&d|research)\b", evidence_text):
             score += 1
             evidence.append("近期公开信息包含创新、平台扩展或合作相关线索。")
@@ -154,6 +173,40 @@ def _score_fisher_criteria(summary: str, metrics: list[FundamentalMetric], news:
         criteria.append(FisherCriterion(index, title, question, _assessment_text(score), evidence, score))
     return criteria
 
+
+
+def _sec_change_map(sec_data: SecFundamentalData | None) -> dict[str, float | None]:
+    if not sec_data:
+        return {}
+    changes: dict[str, float | None] = {}
+    for label, points in sec_data.facts.items():
+        latest = points[0] if points else None
+        previous = points[1] if len(points) > 1 else None
+        if latest:
+            changes[label] = _fact_change(latest, previous)
+    return changes
+
+
+def _sec_change_sentence(sec_data: SecFundamentalData | None, label: str) -> str:
+    points = sec_data.facts.get(label, []) if sec_data else []
+    if not points:
+        return f"SEC 近一年 {label} XBRL 字段暂无可用数据。"
+    latest = points[0]
+    previous = points[1] if len(points) > 1 else None
+    change = _fact_change(latest, previous)
+    if change is None:
+        return f"SEC 最新 {label}为 {_format_fact_value(latest)}（报告期末 {latest.end_date or 'N/A'}）。"
+    return f"SEC 最新 {label}为 {_format_fact_value(latest)}，较上一可比披露 {_format_change(change)}。"
+
+
+def _change_points(change: float | None) -> int:
+    if change is None:
+        return 0
+    if change >= 0.05:
+        return 1
+    if change <= -0.05:
+        return -1
+    return 0
 
 def _company_table(analysis: FisherAnalysis) -> str:
     q = analysis.quote
@@ -176,6 +229,101 @@ def _metrics_table(metrics: list[FundamentalMetric]) -> str:
     rows = [(metric.label, metric.value, _status_badge(metric.status), metric.interpretation) for metric in metrics]
     return _markdown_table(["指标", "数值", "状态", "解读"], rows)
 
+
+
+def _sec_filings_table(sec_data: SecFundamentalData) -> str:
+    if sec_data.error and not sec_data.filings:
+        return f"> SEC EDGAR 数据获取失败：{_escape_md(sec_data.error)}"
+    if not sec_data.filings:
+        return "> 近一年未在 SEC EDGAR submissions 中找到 10-K/10-Q 财报。"
+    rows = []
+    for filing in sec_data.filings:
+        link = f"[打开 SEC 文件]({filing.url})" if filing.url else "N/A"
+        rows.append((filing.form, filing.filing_date or "N/A", filing.report_date or "N/A", filing.description or filing.primary_document, link))
+    return _markdown_table(["表格", "提交日", "报告期", "说明", "来源"], rows)
+
+
+def _sec_key_data_panel(sec_data: SecFundamentalData) -> str:
+    if not sec_data.facts:
+        return "> 暂无可图表化的 SEC XBRL companyfacts 数据。"
+    preferred = ["收入", "毛利润", "营业利润", "净利润", "稀释 EPS", "经营现金流", "资本开支", "研发费用", "总资产", "总负债", "股东权益"]
+    rows = []
+    for label in preferred:
+        points = sec_data.facts.get(label, [])
+        if not points:
+            continue
+        latest = points[0]
+        previous = points[1] if len(points) > 1 else None
+        change = _fact_change(latest, previous)
+        rows.append((
+            _metric_icon(label, change),
+            label,
+            _format_fact_value(latest),
+            latest.end_date or latest.filed_date or "N/A",
+            _format_change(change),
+            _sparkline(points),
+        ))
+    return _markdown_table(["图标", "关键数据", "最新值", "报告期末", "环比/同比线索", "近一年趋势"], rows)
+
+
+def _fact_change(latest: SecFactPoint, previous: SecFactPoint | None) -> float | None:
+    if previous is None or previous.value == 0:
+        return None
+    return (latest.value - previous.value) / abs(previous.value)
+
+
+def _metric_icon(label: str, change: float | None) -> str:
+    base = {
+        "收入": "💰",
+        "毛利润": "🏷️",
+        "营业利润": "🏭",
+        "净利润": "📌",
+        "稀释 EPS": "🧮",
+        "经营现金流": "💵",
+        "资本开支": "🏗️",
+        "研发费用": "🔬",
+        "总资产": "🏦",
+        "总负债": "🧱",
+        "股东权益": "🧾",
+    }.get(label, "📊")
+    if change is None:
+        return base
+    if change > 0.03:
+        return f"{base} ↗️"
+    if change < -0.03:
+        return f"{base} ↘️"
+    return f"{base} ➡️"
+
+
+def _format_fact_value(point: SecFactPoint) -> str:
+    if point.unit == "USD/shares":
+        return f"${point.value:,.2f}/share"
+    abs_value = abs(point.value)
+    if abs_value >= 1_000_000_000:
+        return f"${point.value / 1_000_000_000:,.2f}B"
+    if abs_value >= 1_000_000:
+        return f"${point.value / 1_000_000:,.2f}M"
+    return f"${point.value:,.0f}"
+
+
+def _format_change(change: float | None) -> str:
+    if change is None:
+        return "N/A"
+    marker = "🟢" if change > 0 else "🔴" if change < 0 else "⚪"
+    return f"{marker} {change:+.1%}"
+
+
+def _sparkline(points: list[SecFactPoint]) -> str:
+    ordered = list(reversed(points[:6]))
+    values = [point.value for point in ordered]
+    if len(values) == 1:
+        return "▁"
+    low = min(values)
+    high = max(values)
+    blocks = "▁▂▃▄▅▆▇█"
+    if high == low:
+        return "".join("▄" for _ in values)
+    return "".join(blocks[round((value - low) / (high - low) * (len(blocks) - 1))] for value in values)
 
 def _criteria_table(criteria: list[FisherCriterion]) -> str:
     rows = []
@@ -212,6 +360,7 @@ def _risk_notes(analysis: FisherAnalysis) -> str:
     notes = ["- 本报告为自动化初筛，不构成投资建议；评分用于组织尽调优先级，不应单独作为买卖依据。"]
     if analysis.errors:
         notes.append("- 部分数据源返回异常：" + "; ".join(_escape_md(error) for error in analysis.errors))
+    notes.append("- SEC 数据来自 EDGAR submissions/companyfacts（与 SEC EDGAR Search 同源）；XBRL 标签可能因公司披露口径不同而缺失或不可比。")
     notes.append("- Yahoo/Nasdaq 公共接口字段可能滞后或缺失；关键结论需用公司公告与 SEC 文件复核。")
     return "\n".join(notes)
 

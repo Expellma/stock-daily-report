@@ -9,7 +9,7 @@
 - **海报输出**：使用纯 SVG 模版生成海报，默认输出到 `outputs/YYYY-MM-DD/`。
 - **本地定时**：内置 `scheduler` 命令，可按配置每天本地时间 08:00 自动执行；也提供 cron/systemd 示例。
 - **配置化**：运行时间、时区、输出目录、新闻关键词、请求超时、海报尺寸等均在 `config/settings.toml` 中配置。
-- **费雪成长投资分析**：对指定标的抓取公司画像、行情、关键基本面、财报日期和高信号新闻，按 Philip Fisher 15 问生成适合浏览与二次编辑的 Markdown。
+- **费雪成长投资分析**：对指定标的抓取公司画像、行情、SEC EDGAR 近一年 10-K/10-Q 财报、关键 XBRL 基本面、财报日期和高信号新闻，按 Philip Fisher 15 问生成适合浏览与二次编辑的 Markdown。
 
 ## 快速开始
 
@@ -35,9 +35,9 @@ stock-daily-report fisher NVDA --config config/settings.toml --thesis "AI accele
 
 生成结果：
 
-- `outputs/<date>/fisher/nvda_fisher_analysis.md`：包含一页结论、公司画像、关键基本面仪表盘、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
+- `outputs/<date>/fisher/nvda_fisher_analysis.md`：包含一页结论、公司画像、关键基本面仪表盘、SEC EDGAR 近一年 10-K/10-Q 财报表格、带图标与迷你趋势图的关键 XBRL 数据、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
 
-该报告定位为“费雪框架初筛 + 尽调问题清单”，会在公开数据不足时显式标记待验证项，方便继续补充年报、电话会纪要、专家访谈或你在 GPT 中沉淀的个性化投资主线。
+该报告定位为“费雪框架初筛 + SEC 财报数据面板 + 尽调问题清单”，会在公开数据不足时显式标记待验证项，方便继续补充年报、电话会纪要、专家访谈或你在 GPT 中沉淀的个性化投资主线。SEC 数据来自 EDGAR submissions/companyfacts（与 https://www.sec.gov/edgar/search 同源），默认筛选最近 365 天内提交或报告期结束的 10-K/10-Q。
 
 ## 每日 8 点定时运行
 

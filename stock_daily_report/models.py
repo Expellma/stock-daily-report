@@ -73,6 +73,40 @@ class FundamentalSnapshot:
 
 
 @dataclass(frozen=True)
+class SecFiling:
+    form: str
+    filing_date: str
+    report_date: str
+    accession_number: str
+    primary_document: str
+    description: str = ""
+    url: str = ""
+
+
+@dataclass(frozen=True)
+class SecFactPoint:
+    label: str
+    tag: str
+    fiscal_period: str
+    fiscal_year: int | None
+    end_date: str
+    filed_date: str
+    form: str
+    value: float
+    unit: str
+
+
+@dataclass(frozen=True)
+class SecFundamentalData:
+    symbol: str
+    cik: str | None = None
+    filings: list[SecFiling] = field(default_factory=list)
+    facts: dict[str, list[SecFactPoint]] = field(default_factory=dict)
+    source: str = "SEC EDGAR submissions/companyfacts"
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class FisherCriterion:
     number: int
     title: str
@@ -93,6 +127,7 @@ class FisherAnalysis:
     earnings: EarningsEvent | None = None
     criteria: list[FisherCriterion] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    sec_data: SecFundamentalData = field(default_factory=lambda: SecFundamentalData(symbol=""))
 
 
 @dataclass

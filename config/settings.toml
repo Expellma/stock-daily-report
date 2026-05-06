@@ -1,0 +1,30 @@
+[app]
+watchlist_path = "config/watchlist.csv"
+sp500_path = "config/sp500_symbols.csv"
+output_dir = "outputs"
+max_watchlist_news = 4
+max_sp500_news = 12
+request_timeout_seconds = 10
+user_agent = "stock-daily-report/0.1 (+local research workflow)"
+
+[schedule]
+time = "08:00"
+timezone = "America/New_York"
+run_on_weekends = false
+
+[poster]
+width = 1080
+height = 1440
+background = "#F7F8FA"
+primary = "#111827"
+muted = "#6B7280"
+accent = "#2563EB"
+positive = "#DC2626"
+negative = "#059669"
+
+[signals]
+major_keywords = [
+  "earnings", "guidance", "revenue", "profit", "loss", "merger", "acquisition",
+  "buyback", "dividend", "SEC", "lawsuit", "FDA", "contract", "partnership",
+  "layoff", "upgrade", "downgrade", "tariff", "AI", "chip", "cloud"
+]

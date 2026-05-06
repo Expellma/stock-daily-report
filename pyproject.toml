@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-daily-report"
+version = "0.1.0"
+description = "Generate daily US stock watchlist reports and social-media-ready posters locally."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+stock-daily-report = "stock_daily_report.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["stock_daily_report*"]

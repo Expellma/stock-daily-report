@@ -44,6 +44,57 @@ class EarningsEvent:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class FundamentalMetric:
+    label: str
+    value: str
+    interpretation: str
+    status: str = "neutral"
+
+
+@dataclass(frozen=True)
+class CompanyProfile:
+    symbol: str
+    name: str
+    sector: str = ""
+    industry: str = ""
+    website: str = ""
+    summary: str = ""
+    source: str = "Yahoo Finance quoteSummary"
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalSnapshot:
+    symbol: str
+    metrics: list[FundamentalMetric] = field(default_factory=list)
+    source: str = "Yahoo Finance quoteSummary"
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class FisherCriterion:
+    number: int
+    title: str
+    question: str
+    assessment: str
+    evidence: list[str] = field(default_factory=list)
+    score: int | None = None
+
+
+@dataclass
+class FisherAnalysis:
+    generated_at: datetime
+    security: Security
+    quote: Quote
+    profile: CompanyProfile
+    fundamentals: FundamentalSnapshot
+    news: list[NewsItem] = field(default_factory=list)
+    earnings: EarningsEvent | None = None
+    criteria: list[FisherCriterion] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
 @dataclass
 class SecurityDigest:
     security: Security

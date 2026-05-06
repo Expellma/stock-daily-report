@@ -9,6 +9,7 @@
 - **海报输出**：使用纯 SVG 模版生成海报，默认输出到 `outputs/YYYY-MM-DD/`。
 - **本地定时**：内置 `scheduler` 命令，可按配置每天本地时间 08:00 自动执行；也提供 cron/systemd 示例。
 - **配置化**：运行时间、时区、输出目录、新闻关键词、请求超时、海报尺寸等均在 `config/settings.toml` 中配置。
+- **费雪成长投资分析**：对指定标的抓取公司画像、行情、关键基本面、财报日期和高信号新闻，按 Philip Fisher 15 问生成适合浏览与二次编辑的 Markdown。
 
 ## 快速开始
 
@@ -23,6 +24,20 @@ stock-daily-report run --config config/settings.toml
 
 - `outputs/<date>/daily_report.json`：结构化数据，便于二次分发。
 - `outputs/<date>/daily_poster.svg`：每日行情海报，可直接发布或转成 PNG。
+
+## 费雪成长投资 Markdown 分析
+
+对任意指定标的生成基本面初筛报告：
+
+```bash
+stock-daily-report fisher NVDA --config config/settings.toml --thesis "AI accelerator demand and data-center capex bellwether"
+```
+
+生成结果：
+
+- `outputs/<date>/fisher/nvda_fisher_analysis.md`：包含一页结论、公司画像、关键基本面仪表盘、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
+
+该报告定位为“费雪框架初筛 + 尽调问题清单”，会在公开数据不足时显式标记待验证项，方便继续补充年报、电话会纪要、专家访谈或你在 GPT 中沉淀的个性化投资主线。
 
 ## 每日 8 点定时运行
 
@@ -58,9 +73,10 @@ timezone = "America/New_York"
 
 ```text
 stock_daily_report/
-  cli.py          # CLI 入口：run / scheduler
+  cli.py          # CLI 入口：run / scheduler / fisher
   config.py       # 配置加载与默认值
-  data_sources.py # 行情、新闻、财报数据采集
+  data_sources.py # 行情、新闻、财报与基本面数据采集
+  fisher.py       # 费雪成长投资分析与 Markdown 渲染
   report.py       # 报告编排与排序逻辑
   poster.py       # SVG 海报绘制
   scheduler.py    # 本地每日调度循环

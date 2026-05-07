@@ -60,12 +60,15 @@ stock-daily-report fisher NVDA --config config/settings.toml --thesis "AI accele
 stock-daily-report fisher 600000.SH --config config/settings.toml --thesis "银行数字化经营与息差修复"
 stock-daily-report fisher 000001.SZ --config config/settings.toml
 stock-daily-report fisher 600519 --config config/settings.toml
+stock-daily-report fisher 600519.SH --name 贵州茅台 --annual-report-dir /input/贵州茅台
 ```
 
 生成结果：
 
-- `outputs/<date>/fisher/nvda_fisher_analysis.md`：美股报告，包含一页结论、公司画像、关键基本面仪表盘、SEC EDGAR 近一年 10-K/10-Q 财报表格、带图标与迷你趋势图的关键 XBRL 数据、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
-- `outputs/<date>/fisher/600000.sh_fisher_analysis.md`：A 股报告，包含大陆行情/画像/基本面/公告来源说明、巨潮资讯 CNINFO 或交易所公告索引、费雪 15 问逐项评分和尽调清单。
+- `outputs/<date>/fisher/nvda_fisher_analysis.md`：美股报告，包含一页结论、公司画像、关键基本面仪表盘、SEC EDGAR 近一年 10-K/10-Q 财报表格、本地年报文件分析、带图标与迷你趋势图的关键 XBRL 数据、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
+- `outputs/<date>/fisher/600000.sh_fisher_analysis.md`：A 股报告，包含大陆行情/画像/基本面/公告来源说明、巨潮资讯 CNINFO 或交易所公告索引、本地年报文件分析、费雪 15 问逐项评分和尽调清单。
+
+本地年报目录可通过 `--annual-report-dir` 指定；未传入时默认读取 `/input/<标的名>`，其中 `<标的名>` 优先使用 `--name`，否则使用 `symbol`。当前会直接解析 `.txt` / `.md` 年报片段，`.pdf` 会在报告中标记为暂不支持并继续生成报告。
 
 支持的 A 股代码格式包括 `600000.SH`、`000001.SZ`、`430047.BJ` 以及纯 6 位代码。纯 6 位代码会按常见号段推断交易所：`5/6/9` 开头归为上交所，`0/1/2/3` 开头归为深交所，`4/8` 开头归为北交所。识别为 A 股后，费雪链路不会调用 Yahoo Finance、Nasdaq 或 SEC EDGAR，而是使用以下大陆可访问公开数据源适配层：
 

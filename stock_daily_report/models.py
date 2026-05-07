@@ -107,6 +107,28 @@ class SecFundamentalData:
 
 
 @dataclass(frozen=True)
+class AnnualReportFile:
+    path: str
+    status: str
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class AnnualReportEvidenceItem:
+    keyword: str
+    excerpt: str
+    source_file: str
+
+
+@dataclass(frozen=True)
+class AnnualReportEvidence:
+    directory: str
+    files: list[AnnualReportFile] = field(default_factory=list)
+    items: list[AnnualReportEvidenceItem] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class FisherCriterion:
     number: int
     title: str
@@ -127,7 +149,12 @@ class FisherAnalysis:
     earnings: EarningsEvent | None = None
     criteria: list[FisherCriterion] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
-    sec_data: SecFundamentalData = field(default_factory=lambda: SecFundamentalData(symbol=""))
+    sec_data: SecFundamentalData = field(
+        default_factory=lambda: SecFundamentalData(symbol="")
+    )
+    annual_report_evidence: AnnualReportEvidence = field(
+        default_factory=lambda: AnnualReportEvidence(directory="")
+    )
 
 
 @dataclass

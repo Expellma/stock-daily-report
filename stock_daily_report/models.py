@@ -116,6 +116,31 @@ class FisherCriterion:
     score: int | None = None
 
 
+@dataclass(frozen=True)
+class AnnualReportFile:
+    filename: str
+    path: str
+    file_type: str
+    status: str
+    content: str = ""
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class AnnualReportEvidenceItem:
+    keyword: str
+    filename: str
+    excerpt: str
+
+
+@dataclass(frozen=True)
+class AnnualReportEvidence:
+    report_dir: str
+    files: list[AnnualReportFile] = field(default_factory=list)
+    evidence: list[AnnualReportEvidenceItem] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
 @dataclass
 class FisherAnalysis:
     generated_at: datetime
@@ -128,6 +153,7 @@ class FisherAnalysis:
     criteria: list[FisherCriterion] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     sec_data: SecFundamentalData = field(default_factory=lambda: SecFundamentalData(symbol=""))
+    annual_report_evidence: AnnualReportEvidence = field(default_factory=lambda: AnnualReportEvidence(report_dir=""))
 
 
 @dataclass

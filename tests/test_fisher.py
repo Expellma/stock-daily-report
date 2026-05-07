@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from stock_daily_report.fisher import render_fisher_markdown
+from stock_daily_report.fisher import load_local_annual_reports, render_fisher_markdown
 from stock_daily_report.models import (
     CompanyProfile,
     EarningsEvent,
@@ -63,3 +63,29 @@ def test_render_fisher_markdown_includes_framework_sections():
     assert "💰 ↗️" in markdown
     assert "打开 SEC 文件" in markdown
     assert "NVIDIA launches new AI platform" in markdown
+
+
+def test_render_fisher_markdown_includes_local_annual_report_evidence(tmp_path):
+    report_dir = tmp_path / "input" / "贵州茅台"
+    report_dir.mkdir(parents=True)
+    report_file = report_dir / "2025_annual_report.txt"
+    report_file.write_text("公司持续加大研发投入，毛利率保持稳定，经营现金流充裕；同时披露客户集中度、存货、应收账款、诉讼、监管处罚和关联交易风险。", encoding="utf-8")
+
+    annual_report_evidence = load_local_annual_reports(report_dir)
+    analysis = FisherAnalysis(
+        generated_at=datetime(2026, 5, 6, tzinfo=timezone.utc),
+        security=Security("600519.SH", "贵州茅台"),
+        quote=Quote("600519.SH"),
+        profile=CompanyProfile("600519.SH", "贵州茅台", summary="高端白酒公司。"),
+        fundamentals=FundamentalSnapshot("600519.SH"),
+        annual_report_evidence=annual_report_evidence,
+    )
+
+    markdown = render_fisher_markdown(analysis)
+
+    assert "## 📁 本地年报文件分析" in markdown
+    assert "本地来源目录" in markdown
+    assert "2025_annual_report.txt" in markdown
+    assert "研发投入" in markdown
+    assert "经营现金流" in markdown
+    assert "关联交易" in markdown

@@ -25,6 +25,7 @@ def main() -> None:
     fisher_parser.add_argument("--name", help="Optional company display name override.")
     fisher_parser.add_argument("--thesis", default="", help="Optional custom investment thesis or GPT-style setup note.")
     fisher_parser.add_argument("--output-dir", type=Path, help="Optional output directory; defaults to outputs/<date>/fisher/.")
+    fisher_parser.add_argument("--annual-report-dir", type=Path, help="Local annual-report directory; defaults to /input/<name-or-symbol>.")
 
     args = parser.parse_args()
 
@@ -35,7 +36,8 @@ def main() -> None:
         print(f"report={json_path}")
         print(f"poster={poster_path}")
     elif args.command == "fisher":
-        analysis = build_fisher_analysis(settings, args.symbol, name=args.name, thesis=args.thesis)
+        annual_report_dir = args.annual_report_dir or Path("/input") / (args.name or args.symbol)
+        analysis = build_fisher_analysis(settings, args.symbol, name=args.name, thesis=args.thesis, annual_report_dir=annual_report_dir)
         output_dir = args.output_dir or output_fisher_dir_for(settings, analysis.generated_at)
         markdown_path = write_fisher_markdown(analysis, output_dir)
         print(f"fisher_markdown={markdown_path}")

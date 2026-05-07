@@ -54,13 +54,16 @@ INSTALL_PROJECT=1 sh scripts/windows_run.sh run
 
 ```bash
 stock-daily-report fisher NVDA --config config/settings.toml --thesis "AI accelerator demand and data-center capex bellwether"
+stock-daily-report fisher 600519.SH --name 贵州茅台 --annual-report-dir /input/贵州茅台
 ```
 
 生成结果：
 
-- `outputs/<date>/fisher/nvda_fisher_analysis.md`：包含一页结论、公司画像、关键基本面仪表盘、SEC EDGAR 近一年 10-K/10-Q 财报表格、带图标与迷你趋势图的关键 XBRL 数据、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
+- `outputs/<date>/fisher/nvda_fisher_analysis.md`：包含一页结论、公司画像、关键基本面仪表盘、SEC EDGAR 近一年 10-K/10-Q 财报表格、本地年报文件分析、带图标与迷你趋势图的关键 XBRL 数据、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
 
-该报告定位为“费雪框架初筛 + SEC 财报数据面板 + 尽调问题清单”，会在公开数据不足时显式标记待验证项，方便继续补充年报、电话会纪要、专家访谈或你在 GPT 中沉淀的个性化投资主线。SEC 数据来自 EDGAR submissions/companyfacts（与 https://www.sec.gov/edgar/search 同源），默认筛选最近 365 天内提交或报告期结束的 10-K/10-Q。
+本地年报目录可通过 `--annual-report-dir` 指定；未传入时默认读取 `/input/<标的名>`，其中 `<标的名>` 优先使用 `--name`，否则使用 `symbol`。当前会直接解析 `.txt` / `.md` 年报片段，`.pdf` 会在报告中标记为暂不支持并继续生成报告。
+
+该报告定位为“费雪框架初筛 + SEC 财报数据面板 + 本地年报证据 + 尽调问题清单”，会在公开数据不足时显式标记待验证项，方便继续补充年报、电话会纪要、专家访谈或你在 GPT 中沉淀的个性化投资主线。SEC 数据来自 EDGAR submissions/companyfacts（与 https://www.sec.gov/edgar/search 同源），默认筛选最近 365 天内提交或报告期结束的 10-K/10-Q。
 
 ## 每日 8 点定时运行
 

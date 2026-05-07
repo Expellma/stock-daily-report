@@ -9,7 +9,7 @@ import textwrap
 
 from .config import Settings
 from .data_sources import fetch_company_profile, fetch_earnings, fetch_fundamentals, fetch_news, fetch_quote, fetch_sec_fundamentals
-from .models import FisherAnalysis, FisherCriterion, FundamentalMetric, NewsItem, SecFactPoint, SecFundamentalData, Security
+from .models import AnnualReportEvidence, AnnualReportEvidenceItem, AnnualReportFile, FisherAnalysis, FisherCriterion, FundamentalMetric, NewsItem, SecFactPoint, SecFundamentalData, Security
 from .report import output_dir_for
 
 FISHER_FRAMEWORK: tuple[tuple[str, str], ...] = (
@@ -31,7 +31,7 @@ FISHER_FRAMEWORK: tuple[tuple[str, str], ...] = (
 )
 
 
-def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = None, thesis: str = "") -> FisherAnalysis:
+def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = None, thesis: str = "", annual_report_dir: Path | None = None) -> FisherAnalysis:
     """Build a Fisher-style growth fundamental analysis for one symbol."""
 
     normalized_symbol = symbol.strip().upper()
@@ -56,6 +56,8 @@ def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = No
     errors.extend(f"{item.symbol} news: {item.title}" for item in news if item.score < 0)
 
     security = Security(symbol=normalized_symbol, name=name or profile.name or normalized_symbol, thesis=thesis)
+    resolved_report_dir = annual_report_dir or Path("/input") / (name or normalized_symbol)
+    annual_report_evidence = load_local_annual_reports(resolved_report_dir)
     clean_news = [item for item in news if item.score >= 0]
     return FisherAnalysis(
         generated_at=datetime.now(timezone.utc),
@@ -65,9 +67,10 @@ def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = No
         fundamentals=fundamentals,
         news=clean_news,
         earnings=earnings,
-        criteria=_score_fisher_criteria(profile.summary, fundamentals.metrics, clean_news, sec_data),
+        criteria=_score_fisher_criteria(profile.summary, fundamentals.metrics, clean_news, sec_data, annual_report_evidence),
         errors=errors,
         sec_data=sec_data,
+        annual_report_evidence=annual_report_evidence,
     )
 
 
@@ -82,6 +85,93 @@ def write_fisher_markdown(analysis: FisherAnalysis, output_dir: Path) -> Path:
 
 def output_fisher_dir_for(settings: Settings, generated_at: datetime) -> Path:
     return output_dir_for(settings, generated_at) / "fisher"
+
+
+
+ANNUAL_REPORT_KEYWORDS: tuple[str, ...] = (
+    "研发投入",
+    "研发费用",
+    "毛利率",
+    "经营现金流",
+    "客户集中度",
+    "存货",
+    "应收账款",
+    "诉讼",
+    "监管处罚",
+    "关联交易",
+)
+SUPPORTED_ANNUAL_REPORT_SUFFIXES = {".txt", ".md", ".pdf"}
+
+
+def load_local_annual_reports(report_dir: Path) -> AnnualReportEvidence:
+    """Load local annual-report snippets from a directory without blocking report generation."""
+
+    report_dir = report_dir.expanduser()
+    warnings: list[str] = []
+    files: list[AnnualReportFile] = []
+    evidence: list[AnnualReportEvidenceItem] = []
+    if not report_dir.exists():
+        warnings.append(f"本地年报目录不存在：{report_dir}")
+        return AnnualReportEvidence(report_dir=str(report_dir), files=files, evidence=evidence, warnings=warnings)
+    if not report_dir.is_dir():
+        warnings.append(f"本地年报路径不是目录：{report_dir}")
+        return AnnualReportEvidence(report_dir=str(report_dir), files=files, evidence=evidence, warnings=warnings)
+
+    candidates = sorted(path for path in report_dir.iterdir() if path.is_file() and path.suffix.lower() in SUPPORTED_ANNUAL_REPORT_SUFFIXES)
+    if not candidates:
+        warnings.append(f"本地年报目录为空，或未找到 .txt/.md/.pdf 文件：{report_dir}")
+        return AnnualReportEvidence(report_dir=str(report_dir), files=files, evidence=evidence, warnings=warnings)
+
+    for path in candidates:
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
+            reason = "暂不解析 PDF；请先转换为 .txt 或 .md，PDF 解析可作为后续增强。"
+            files.append(AnnualReportFile(path.name, str(path), suffix.lstrip("."), "unsupported", error=reason))
+            warnings.append(f"{path.name}: {reason}")
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            try:
+                content = path.read_text(encoding="utf-8-sig")
+            except UnicodeDecodeError as exc:
+                reason = f"文本编码无法解析：{exc}"
+                files.append(AnnualReportFile(path.name, str(path), suffix.lstrip("."), "error", error=reason))
+                warnings.append(f"{path.name}: {reason}")
+                continue
+        except OSError as exc:
+            reason = f"读取失败：{exc}"
+            files.append(AnnualReportFile(path.name, str(path), suffix.lstrip("."), "error", error=reason))
+            warnings.append(f"{path.name}: {reason}")
+            continue
+
+        stripped = content.strip()
+        if not stripped:
+            reason = "文件内容为空。"
+            files.append(AnnualReportFile(path.name, str(path), suffix.lstrip("."), "empty", error=reason))
+            warnings.append(f"{path.name}: {reason}")
+            continue
+        files.append(AnnualReportFile(path.name, str(path), suffix.lstrip("."), "loaded", content=stripped))
+        evidence.extend(_extract_annual_report_evidence(path.name, stripped))
+
+    return AnnualReportEvidence(report_dir=str(report_dir), files=files, evidence=evidence, warnings=warnings)
+
+
+def _extract_annual_report_evidence(filename: str, content: str) -> list[AnnualReportEvidenceItem]:
+    evidence: list[AnnualReportEvidenceItem] = []
+    seen: set[tuple[str, str]] = set()
+    for keyword in ANNUAL_REPORT_KEYWORDS:
+        for match in re.finditer(re.escape(keyword), content):
+            start = max(0, match.start() - 45)
+            end = min(len(content), match.end() + 75)
+            excerpt = re.sub(r"\s+", " ", content[start:end]).strip()
+            key = (keyword, excerpt)
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence.append(AnnualReportEvidenceItem(keyword=keyword, filename=filename, excerpt=excerpt))
+            break
+    return evidence
 
 
 def render_fisher_markdown(analysis: FisherAnalysis) -> str:
@@ -117,6 +207,10 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
         "",
         _sec_key_data_panel(analysis.sec_data),
         "",
+        "## 📁 本地年报文件分析",
+        "",
+        _annual_report_section(analysis.annual_report_evidence),
+        "",
         "## 🐟 费雪 15 问逐项检查",
         "",
         _criteria_table(analysis.criteria),
@@ -137,9 +231,10 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
     return "\n".join(sections)
 
 
-def _score_fisher_criteria(summary: str, metrics: list[FundamentalMetric], news: list[NewsItem], sec_data: SecFundamentalData | None = None) -> list[FisherCriterion]:
+def _score_fisher_criteria(summary: str, metrics: list[FundamentalMetric], news: list[NewsItem], sec_data: SecFundamentalData | None = None, annual_report_evidence: AnnualReportEvidence | None = None) -> list[FisherCriterion]:
     metric_status = {metric.label: metric.status for metric in metrics}
-    evidence_text = " ".join([summary, *[item.title for item in news]]).lower()
+    annual_evidence_text = " ".join(item.excerpt for item in (annual_report_evidence.evidence if annual_report_evidence else []))
+    evidence_text = " ".join([summary, annual_evidence_text, *[item.title for item in news]]).lower()
     sec_change = _sec_change_map(sec_data)
     criteria: list[FisherCriterion] = []
     for index, (title, question) in enumerate(FISHER_FRAMEWORK, start=1):
@@ -161,18 +256,19 @@ def _score_fisher_criteria(summary: str, metrics: list[FundamentalMetric], news:
             score += _status_points(metric_status.get("自由现金流")) + _status_points(metric_status.get("负债/权益"))
             score += _change_points(sec_change.get("经营现金流"))
             evidence.extend([_metric_sentence(metrics, "自由现金流"), _metric_sentence(metrics, "负债/权益"), _sec_change_sentence(sec_data, "经营现金流")])
-        if index in {2, 3, 11, 12} and re.search(r"\b(ai|cloud|chip|platform|patent|launch|partnership|r&d|research)\b", evidence_text):
+        if index in {2, 3, 11, 12} and re.search(r"\b(ai|cloud|chip|platform|patent|launch|partnership|r&d|research)\b|研发投入|研发费用|专利|新品|平台|合作", evidence_text):
             score += 1
-            evidence.append("近期公开信息包含创新、平台扩展或合作相关线索。")
-        if index in {14, 15} and re.search(r"\b(sec|lawsuit|probe|fraud|restatement|investigation)\b", evidence_text):
+            evidence.append("公开信息或本地年报包含创新、研发投入、平台扩展或合作相关线索。")
+        if index in {5, 6, 10} and re.search(r"毛利率|经营现金流|存货|应收账款", evidence_text):
+            evidence.append("本地年报出现毛利率、经营现金流、存货或应收账款等经营质量关键词。")
+        if index in {4, 8, 14, 15} and re.search(r"客户集中度|诉讼|监管处罚|关联交易|\b(sec|lawsuit|probe|fraud|restatement|investigation)\b", evidence_text):
             score -= 1
-            evidence.append("近期新闻出现监管、诉讼或诚信相关关键词，需优先核验。")
+            evidence.append("公开信息或本地年报出现客户集中度、诉讼、监管处罚、关联交易或诚信相关关键词，需优先核验。")
         if not evidence:
             evidence.append("公开量化数据不足，建议通过年报、电话会和专家访谈补足。")
         score = min(5, max(1, score))
         criteria.append(FisherCriterion(index, title, question, _assessment_text(score), evidence, score))
     return criteria
-
 
 
 def _sec_change_map(sec_data: SecFundamentalData | None) -> dict[str, float | None]:
@@ -207,6 +303,7 @@ def _change_points(change: float | None) -> int:
     if change <= -0.05:
         return -1
     return 0
+
 
 def _company_table(analysis: FisherAnalysis) -> str:
     q = analysis.quote
@@ -324,6 +421,36 @@ def _sparkline(points: list[SecFactPoint]) -> str:
     if high == low:
         return "".join("▄" for _ in values)
     return "".join(blocks[round((value - low) / (high - low) * (len(blocks) - 1))] for value in values)
+
+
+def _annual_report_section(annual_report_evidence: AnnualReportEvidence) -> str:
+    if not annual_report_evidence.report_dir:
+        return "> 未配置本地年报目录；可使用 --annual-report-dir 指定 .txt/.md 年报片段目录。"
+    lines = [f"**本地来源目录：** `{annual_report_evidence.report_dir}`", ""]
+    if annual_report_evidence.files:
+        rows = []
+        for file in annual_report_evidence.files:
+            status = {
+                "loaded": "✅ 已读取",
+                "unsupported": "⚠️ 暂不支持",
+                "empty": "⚠️ 空文件",
+                "error": "⚠️ 读取失败",
+            }.get(file.status, file.status)
+            rows.append((file.filename, file.file_type, status, file.error or "已纳入本地年报证据池"))
+        lines.append(_markdown_table(["文件名", "类型", "状态", "说明"], rows))
+    else:
+        lines.append("> 未读取到可用的本地年报文件。")
+    if annual_report_evidence.evidence:
+        lines.extend(["", "**提取到的关键证据：**"])
+        for item in annual_report_evidence.evidence[:20]:
+            lines.append(f"- `{_escape_md(item.filename)}` · **{_escape_md(item.keyword)}**：{_escape_md(item.excerpt)}")
+    else:
+        lines.extend(["", "> 暂未从本地年报提取到预设关键词证据。"])
+    if annual_report_evidence.warnings:
+        lines.extend(["", "**无法解析或需要注意的文件/目录：**"])
+        lines.extend(f"- {_escape_md(warning)}" for warning in annual_report_evidence.warnings)
+    return "\n".join(lines)
+
 
 def _criteria_table(criteria: list[FisherCriterion]) -> str:
     rows = []

@@ -1,6 +1,6 @@
 # Stock Daily Report
 
-一个本地运行的美股每日关注标的行情海报生成工程，面向买方投研场景：每天早上 8 点自动抓取关注列表行情、财报与重大业务新闻，并输出适合自媒体传播的简洁海报。
+一个本地运行的股票每日关注标的行情海报生成工程，面向买方投研场景：每天早上 8 点自动抓取关注列表行情、财报与重大业务新闻，并输出适合自媒体传播的简洁海报。
 
 ## 功能概览
 
@@ -9,7 +9,7 @@
 - **海报输出**：使用纯 SVG 模版生成海报，默认输出到 `outputs/YYYY-MM-DD/`。
 - **本地定时**：内置 `scheduler` 命令，可按配置每天本地时间 08:00 自动执行；也提供 cron/systemd 示例。
 - **配置化**：运行时间、时区、输出目录、新闻关键词、请求超时、海报尺寸等均在 `config/settings.toml` 中配置。
-- **费雪成长投资分析**：对指定标的抓取公司画像、行情、SEC EDGAR 近一年 10-K/10-Q 财报、关键 XBRL 基本面、财报日期和高信号新闻，按 Philip Fisher 15 问生成适合浏览与二次编辑的 Markdown。
+- **费雪成长投资分析**：对指定标的抓取公司画像、行情、近一年财报/公告索引、关键基本面、财报日期和高信号新闻；A 股使用大陆可访问的东方财富、巨潮资讯/交易所等公开数据源，美股保留 Yahoo/Nasdaq/SEC 兼容路径，按 Philip Fisher 15 问生成适合浏览与二次编辑的 Markdown。
 
 ## 快速开始
 
@@ -53,14 +53,28 @@ INSTALL_PROJECT=1 sh scripts/windows_run.sh run
 对任意指定标的生成基本面初筛报告：
 
 ```bash
+# 美股：保留 Yahoo Finance / Nasdaq / SEC EDGAR 路径
 stock-daily-report fisher NVDA --config config/settings.toml --thesis "AI accelerator demand and data-center capex bellwether"
+
+# A 股：自动切换到大陆可访问数据源
+stock-daily-report fisher 600000.SH --config config/settings.toml --thesis "银行数字化经营与息差修复"
+stock-daily-report fisher 000001.SZ --config config/settings.toml
+stock-daily-report fisher 600519 --config config/settings.toml
 ```
 
 生成结果：
 
-- `outputs/<date>/fisher/nvda_fisher_analysis.md`：包含一页结论、公司画像、关键基本面仪表盘、SEC EDGAR 近一年 10-K/10-Q 财报表格、带图标与迷你趋势图的关键 XBRL 数据、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
+- `outputs/<date>/fisher/nvda_fisher_analysis.md`：美股报告，包含一页结论、公司画像、关键基本面仪表盘、SEC EDGAR 近一年 10-K/10-Q 财报表格、带图标与迷你趋势图的关键 XBRL 数据、费雪 15 问逐项评分、近期高信号新闻和下一步尽调清单。
+- `outputs/<date>/fisher/600000.sh_fisher_analysis.md`：A 股报告，包含大陆行情/画像/基本面/公告来源说明、巨潮资讯 CNINFO 或交易所公告索引、费雪 15 问逐项评分和尽调清单。
 
-该报告定位为“费雪框架初筛 + SEC 财报数据面板 + 尽调问题清单”，会在公开数据不足时显式标记待验证项，方便继续补充年报、电话会纪要、专家访谈或你在 GPT 中沉淀的个性化投资主线。SEC 数据来自 EDGAR submissions/companyfacts（与 https://www.sec.gov/edgar/search 同源），默认筛选最近 365 天内提交或报告期结束的 10-K/10-Q。
+支持的 A 股代码格式包括 `600000.SH`、`000001.SZ`、`430047.BJ` 以及纯 6 位代码。纯 6 位代码会按常见号段推断交易所：`5/6/9` 开头归为上交所，`0/1/2/3` 开头归为深交所，`4/8` 开头归为北交所。识别为 A 股后，费雪链路不会调用 Yahoo Finance、Nasdaq 或 SEC EDGAR，而是使用以下大陆可访问公开数据源适配层：
+
+- 行情：东方财富公开行情接口，失败时降级到腾讯财经公开行情。
+- 公司画像/基本面：东方财富 F10 公司资料与主要财务指标。
+- 新闻：东方财富资讯公开搜索结果；可继续扩展到同花顺财经、证券时报/中国证券报 RSS 或公开页面。
+- 年报/公告索引：巨潮资讯 CNINFO，并预留上交所 SSE、深交所 SZSE 公告页面适配入口。
+
+该报告定位为“费雪框架初筛 + 财报/公告数据面板 + 尽调问题清单”，会在公开数据不足时显式标记待验证项，方便继续补充年报、业绩说明会、电话会纪要、专家访谈或你在 GPT 中沉淀的个性化投资主线。美股 SEC 数据来自 EDGAR submissions/companyfacts（与 https://www.sec.gov/edgar/search 同源），A 股公告默认筛选最近 365 天内披露的年报/公告索引。任一公开接口失败时，报告会保留已成功的数据源，并在“数据限制与风险提示”中记录失败原因，而不是回退到不适配标的地区的 Yahoo/Nasdaq/SEC 路径。
 
 ## 每日 8 点定时运行
 
@@ -90,7 +104,7 @@ timezone = "America/New_York"
 - `config/sp500_symbols.csv`：标普 500 扫描池，可按需要维护完整列表。
 - `config/settings.toml`：数据源、关键词、调度时间、海报样式。
 
-> 默认数据源使用 Yahoo Finance Chart/RSS 与 Nasdaq 财报 API，均无需 API Key；网络不可用时会生成降级海报并在 JSON 中记录错误，保证任务可观测。
+> 日报默认数据源使用 Yahoo Finance Chart/RSS 与 Nasdaq 财报 API；费雪分析会按代码类型选择美股或 A 股公开数据源。全部接口均无需 API Key；网络不可用时会生成降级输出并在 JSON/Markdown 中记录错误，保证任务可观测。
 
 ## 项目结构
 

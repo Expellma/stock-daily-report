@@ -14,3 +14,6 @@ stock-daily-report = "stock_daily_report.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["stock_daily_report*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -264,8 +264,8 @@ def build_fisher_analysis(
         name=name or profile.name or normalized_symbol,
         thesis=thesis,
     )
-    resolved_report_dir = annual_report_dir or Path("/input") / (
-        name or profile.name or normalized_symbol
+    resolved_report_dir = annual_report_dir or resolve_local_annual_report_dir(
+        normalized_symbol, name or profile.name
     )
     annual_report_evidence = load_local_annual_reports(resolved_report_dir)
     clean_news = [item for item in news if item.score >= 0]
@@ -301,6 +301,36 @@ def write_fisher_markdown(analysis: FisherAnalysis, output_dir: Path) -> Path:
 
 def output_fisher_dir_for(settings: Settings, generated_at: datetime) -> Path:
     return output_dir_for(settings, generated_at) / "fisher"
+
+
+def resolve_local_annual_report_dir(
+    symbol: str,
+    name: str | None = None,
+    input_root: Path | None = None,
+) -> Path:
+    """Resolve the default local annual-report directory under project input/.
+
+    Matching is case-insensitive so a symbol such as NVDA can load files from
+    input/nvda, input/NVDA, or any other casing used by the local directory.
+    """
+
+    root = input_root or Path.cwd() / "input"
+    candidates = [candidate for candidate in (name, symbol) if candidate]
+    matched = _case_insensitive_child_dir(root, candidates)
+    if matched:
+        return matched
+    fallback_name = candidates[0] if candidates else symbol
+    return root / fallback_name
+
+
+def _case_insensitive_child_dir(root: Path, names: list[str]) -> Path | None:
+    wanted = {name.strip().casefold() for name in names if name.strip()}
+    if not wanted or not root.is_dir():
+        return None
+    for child in root.iterdir():
+        if child.is_dir() and child.name.casefold() in wanted:
+            return child
+    return None
 
 
 def load_local_annual_reports(report_dir: Path) -> AnnualReportEvidence:

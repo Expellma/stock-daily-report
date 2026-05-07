@@ -290,6 +290,25 @@ def test_local_annual_report_evidence_is_loaded_and_rendered(tmp_path):
     assert "暂不支持直接解析 PDF" in markdown
 
 
+def test_resolve_local_annual_report_dir_matches_symbol_case_insensitively(tmp_path):
+    from stock_daily_report.fisher import resolve_local_annual_report_dir
+
+    input_root = tmp_path / "input"
+    report_dir = input_root / "nvda"
+    report_dir.mkdir(parents=True)
+
+    assert resolve_local_annual_report_dir("NVDA", input_root=input_root) == report_dir
+
+
+def test_resolve_local_annual_report_dir_defaults_to_project_input(tmp_path, monkeypatch):
+    from stock_daily_report.fisher import resolve_local_annual_report_dir
+
+    report_dir = tmp_path / "input" / "nvda"
+    report_dir.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    assert resolve_local_annual_report_dir("NVDA") == report_dir
+
 def test_ascii_keyword_matching_uses_word_boundaries():
     from stock_daily_report.fisher import _score_fisher_criteria
 

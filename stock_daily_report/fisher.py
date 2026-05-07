@@ -264,7 +264,7 @@ def build_fisher_analysis(
         name=name or profile.name or normalized_symbol,
         thesis=thesis,
     )
-    resolved_report_dir = annual_report_dir or Path("/input") / (
+    resolved_report_dir = annual_report_dir or resolve_local_annual_report_dir(
         name or profile.name or normalized_symbol
     )
     annual_report_evidence = load_local_annual_reports(resolved_report_dir)
@@ -301,6 +301,31 @@ def write_fisher_markdown(analysis: FisherAnalysis, output_dir: Path) -> Path:
 
 def output_fisher_dir_for(settings: Settings, generated_at: datetime) -> Path:
     return output_dir_for(settings, generated_at) / "fisher"
+
+
+def resolve_local_annual_report_dir(
+    identifier: str, input_root: Path | None = None
+) -> Path:
+    """Resolve the default local annual-report directory case-insensitively.
+
+    The default local input path is the project working directory's ``input``
+    folder, e.g. ``./input/nvda`` for ``NVDA``.  If a child directory matches
+    the requested identifier ignoring case, return the on-disk path so users do
+    not need to match ticker capitalization exactly.
+    """
+
+    root = input_root or Path.cwd() / "input"
+    requested = identifier.strip()
+    candidate = root / requested
+    if candidate.exists():
+        return candidate
+
+    if root.is_dir():
+        requested_casefold = requested.casefold()
+        for child in sorted(root.iterdir(), key=lambda path: path.name.casefold()):
+            if child.name.casefold() == requested_casefold:
+                return child
+    return candidate
 
 
 def load_local_annual_reports(report_dir: Path) -> AnnualReportEvidence:

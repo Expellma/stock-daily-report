@@ -7,7 +7,12 @@ import logging
 from pathlib import Path
 
 from .config import load_settings
-from .fisher import build_fisher_analysis, output_fisher_dir_for, write_fisher_markdown
+from .fisher import (
+    build_fisher_analysis,
+    output_fisher_dir_for,
+    resolve_local_annual_report_dir,
+    write_fisher_markdown,
+)
 from .scheduler import run_forever, run_once
 
 
@@ -55,7 +60,7 @@ def main() -> None:
     fisher_parser.add_argument(
         "--annual-report-dir",
         type=Path,
-        help="Local annual-report directory; defaults to /input/<name-or-symbol>.",
+        help="Local annual-report directory; defaults to ./input/<name-or-symbol> with case-insensitive directory matching.",
     )
 
     args = parser.parse_args()
@@ -69,7 +74,7 @@ def main() -> None:
         print(f"report={json_path}")
         print(f"poster={poster_path}")
     elif args.command == "fisher":
-        annual_report_dir = args.annual_report_dir or Path("/input") / (
+        annual_report_dir = args.annual_report_dir or resolve_local_annual_report_dir(
             args.name or args.symbol
         )
         analysis = build_fisher_analysis(

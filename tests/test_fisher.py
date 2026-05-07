@@ -251,6 +251,63 @@ def test_score_fisher_criteria_uses_chinese_annual_report_keywords():
     )
 
 
+def test_default_local_annual_report_dir_uses_project_input_case_insensitively(
+    tmp_path, monkeypatch
+):
+    from stock_daily_report.fisher import resolve_local_annual_report_dir
+
+    input_dir = tmp_path / "input"
+    report_dir = input_dir / "nvda"
+    report_dir.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    assert resolve_local_annual_report_dir("NVDA") == report_dir
+
+
+def test_build_fisher_analysis_defaults_to_project_input_symbol_dir_case_insensitively(
+    tmp_path, monkeypatch
+):
+    input_dir = tmp_path / "input"
+    report_dir = input_dir / "nvda"
+    report_dir.mkdir(parents=True)
+    (report_dir / "2025.md").write_text(
+        "年度报告：research 投入增加，经营现金流改善。", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_quote",
+        lambda symbol, app: Quote(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_company_profile",
+        lambda symbol, app: CompanyProfile(symbol, ""),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_fundamentals",
+        lambda symbol, app: FundamentalSnapshot(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_earnings",
+        lambda symbol, app: EarningsEvent(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_sec_fundamentals",
+        lambda symbol, app: SecFundamentalData(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_news",
+        lambda symbol, app, keywords, limit: [],
+    )
+
+    analysis = build_fisher_analysis(Settings(), "NVDA")
+
+    assert analysis.annual_report_evidence.directory == str(report_dir)
+    assert any(
+        file.status == "loaded" for file in analysis.annual_report_evidence.files
+    )
+
+
 def test_local_annual_report_evidence_is_loaded_and_rendered(tmp_path):
     from stock_daily_report.fisher import (
         load_local_annual_reports,

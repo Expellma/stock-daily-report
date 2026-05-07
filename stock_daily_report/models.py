@@ -29,7 +29,7 @@ class NewsItem:
     symbol: str
     title: str
     link: str
-    publisher: str = "Yahoo Finance RSS"
+    publisher: str = "Public finance news"
     published_at: datetime | None = None
     score: int = 0
 
@@ -60,7 +60,7 @@ class CompanyProfile:
     industry: str = ""
     website: str = ""
     summary: str = ""
-    source: str = "Yahoo Finance quoteSummary"
+    source: str = "Public company profile"
     error: str | None = None
 
 
@@ -68,7 +68,7 @@ class CompanyProfile:
 class FundamentalSnapshot:
     symbol: str
     metrics: list[FundamentalMetric] = field(default_factory=list)
-    source: str = "Yahoo Finance quoteSummary"
+    source: str = "Public fundamentals"
     error: str | None = None
 
 
@@ -102,7 +102,7 @@ class SecFundamentalData:
     cik: str | None = None
     filings: list[SecFiling] = field(default_factory=list)
     facts: dict[str, list[SecFactPoint]] = field(default_factory=dict)
-    source: str = "SEC EDGAR submissions/companyfacts"
+    source: str = "Public filings/fundamentals"
     error: str | None = None
 
 

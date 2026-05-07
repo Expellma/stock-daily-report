@@ -8,7 +8,7 @@ import re
 import textwrap
 
 from .config import Settings
-from .data_sources import fetch_company_profile, fetch_earnings, fetch_fundamentals, fetch_news, fetch_quote, fetch_sec_fundamentals
+from .data_sources import fetch_cn_company_profile, fetch_cn_filings, fetch_cn_fundamentals, fetch_cn_news, fetch_cn_quote, fetch_company_profile, fetch_earnings, fetch_fundamentals, fetch_news, fetch_quote, fetch_sec_fundamentals, is_cn_symbol
 from .models import FisherAnalysis, FisherCriterion, FundamentalMetric, NewsItem, SecFactPoint, SecFundamentalData, Security
 from .report import output_dir_for
 
@@ -36,12 +36,20 @@ def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = No
 
     normalized_symbol = symbol.strip().upper()
     errors: list[str] = []
-    quote = fetch_quote(normalized_symbol, settings.app)
-    profile = fetch_company_profile(normalized_symbol, settings.app)
-    fundamentals = fetch_fundamentals(normalized_symbol, settings.app)
-    earnings = fetch_earnings(normalized_symbol, settings.app)
-    sec_data = fetch_sec_fundamentals(normalized_symbol, settings.app)
-    news = fetch_news(normalized_symbol, settings.app, settings.signals.major_keywords, settings.app.max_watchlist_news)
+    if is_cn_symbol(normalized_symbol):
+        quote = fetch_cn_quote(normalized_symbol, settings.app)
+        profile = fetch_cn_company_profile(normalized_symbol, settings.app)
+        fundamentals = fetch_cn_fundamentals(normalized_symbol, settings.app)
+        earnings = None
+        sec_data = fetch_cn_filings(normalized_symbol, settings.app)
+        news = fetch_cn_news(normalized_symbol, settings.app, settings.signals.major_keywords, settings.app.max_watchlist_news)
+    else:
+        quote = fetch_quote(normalized_symbol, settings.app)
+        profile = fetch_company_profile(normalized_symbol, settings.app)
+        fundamentals = fetch_fundamentals(normalized_symbol, settings.app)
+        earnings = fetch_earnings(normalized_symbol, settings.app)
+        sec_data = fetch_sec_fundamentals(normalized_symbol, settings.app)
+        news = fetch_news(normalized_symbol, settings.app, settings.signals.major_keywords, settings.app.max_watchlist_news)
 
     if quote.error:
         errors.append(f"{normalized_symbol} quote: {quote.error}")
@@ -49,10 +57,10 @@ def build_fisher_analysis(settings: Settings, symbol: str, name: str | None = No
         errors.append(f"{normalized_symbol} profile: {profile.error}")
     if fundamentals.error:
         errors.append(f"{normalized_symbol} fundamentals: {fundamentals.error}")
-    if earnings.error:
+    if earnings and earnings.error:
         errors.append(f"{normalized_symbol} earnings: {earnings.error}")
     if sec_data.error:
-        errors.append(f"{normalized_symbol} SEC EDGAR: {sec_data.error}")
+        errors.append(f"{normalized_symbol} filings/fundamental filings: {sec_data.error}")
     errors.extend(f"{item.symbol} news: {item.title}" for item in news if item.score < 0)
 
     security = Security(symbol=normalized_symbol, name=name or profile.name or normalized_symbol, thesis=thesis)
@@ -92,7 +100,7 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
     sections = [
         f"# {analysis.security.name}（{analysis.security.symbol}）费雪成长投资基本面分析",
         "",
-        f"> 生成时间：{analysis.generated_at.isoformat()} · 框架：Philip Fisher 15 个成长股问题 · SEC 近一年 10-K/10-Q 财报",
+        f"> 生成时间：{analysis.generated_at.isoformat()} · 框架：Philip Fisher 15 个成长股问题 · {analysis.sec_data.source or '公开披露'}",
         "",
         "## 🧭 一页结论",
         "",
@@ -109,7 +117,7 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
         "",
         _metrics_table(analysis.fundamentals.metrics),
         "",
-        "## 🏛️ SEC EDGAR 近一年财报数据",
+        f"## 🏛️ {_filing_section_title(analysis.sec_data)}",
         "",
         _sec_filings_table(analysis.sec_data),
         "",
@@ -190,13 +198,14 @@ def _sec_change_map(sec_data: SecFundamentalData | None) -> dict[str, float | No
 def _sec_change_sentence(sec_data: SecFundamentalData | None, label: str) -> str:
     points = sec_data.facts.get(label, []) if sec_data else []
     if not points:
-        return f"SEC 近一年 {label} XBRL 字段暂无可用数据。"
+        source = sec_data.source if sec_data else "公开披露"
+        return f"{source} 近一年 {label} 字段暂无可用数据。"
     latest = points[0]
     previous = points[1] if len(points) > 1 else None
     change = _fact_change(latest, previous)
     if change is None:
-        return f"SEC 最新 {label}为 {_format_fact_value(latest)}（报告期末 {latest.end_date or 'N/A'}）。"
-    return f"SEC 最新 {label}为 {_format_fact_value(latest)}，较上一可比披露 {_format_change(change)}。"
+        return f"{sec_data.source} 最新 {label}为 {_format_fact_value(latest)}（报告期末 {latest.end_date or 'N/A'}）。"
+    return f"{sec_data.source} 最新 {label}为 {_format_fact_value(latest)}，较上一可比披露 {_format_change(change)}。"
 
 
 def _change_points(change: float | None) -> int:
@@ -214,7 +223,11 @@ def _company_table(analysis: FisherAnalysis) -> str:
         ("行业", analysis.profile.sector or "N/A"),
         ("细分赛道", analysis.profile.industry or "N/A"),
         ("官网", analysis.profile.website or "N/A"),
-        ("最新价格", _format_price(q.price)),
+        ("行情来源", q.source or "N/A"),
+        ("画像来源", analysis.profile.source or "N/A"),
+        ("基本面来源", analysis.fundamentals.source or "N/A"),
+        ("公告来源", analysis.sec_data.source or "N/A"),
+        ("最新价格", _format_price(q.price, analysis.quote.source)),
         ("日涨跌幅", _format_percent(q.change_percent)),
         ("下次财报", analysis.earnings.report_date if analysis.earnings and analysis.earnings.report_date else "N/A"),
     ]
@@ -232,20 +245,21 @@ def _metrics_table(metrics: list[FundamentalMetric]) -> str:
 
 
 def _sec_filings_table(sec_data: SecFundamentalData) -> str:
+    source = sec_data.source or "公开披露"
     if sec_data.error and not sec_data.filings:
-        return f"> SEC EDGAR 数据获取失败：{_escape_md(sec_data.error)}"
+        return f"> {source} 数据获取失败：{_escape_md(sec_data.error)}"
     if not sec_data.filings:
-        return "> 近一年未在 SEC EDGAR submissions 中找到 10-K/10-Q 财报。"
+        return f"> 近一年未在 {source} 中找到财报/公告。"
     rows = []
     for filing in sec_data.filings:
-        link = f"[打开 SEC 文件]({filing.url})" if filing.url else "N/A"
+        link = f"[打开披露文件]({filing.url})" if filing.url else "N/A"
         rows.append((filing.form, filing.filing_date or "N/A", filing.report_date or "N/A", filing.description or filing.primary_document, link))
     return _markdown_table(["表格", "提交日", "报告期", "说明", "来源"], rows)
 
 
 def _sec_key_data_panel(sec_data: SecFundamentalData) -> str:
     if not sec_data.facts:
-        return "> 暂无可图表化的 SEC XBRL companyfacts 数据。"
+        return f"> 暂无可图表化的 {sec_data.source or '公开披露'} 关键财务数据。"
     preferred = ["收入", "毛利润", "营业利润", "净利润", "稀释 EPS", "经营现金流", "资本开支", "研发费用", "总资产", "总负债", "股东权益"]
     rows = []
     for label in preferred:
@@ -345,10 +359,11 @@ def _news_list(news: list[NewsItem]) -> str:
 
 
 def _due_diligence_list(analysis: FisherAnalysis) -> str:
+    filing_prompt = "阅读最近 2 次 10-K/10-Q" if "SEC" in (analysis.sec_data.source or "") else "阅读最近 2 期年报/季报与交易所公告"
     return "\n".join(
         [
-            "- 阅读最近 2 次 10-K/10-Q，拆分收入增长的价格、销量、产品和地区贡献。",
-            "- 对照电话会纪要核验管理层是否持续解释长期投入、利润率改善路径和风险。",
+            f"- {filing_prompt}，拆分收入增长的价格、销量、产品和地区贡献。",
+            "- 对照电话会纪要/业绩说明会核验管理层是否持续解释长期投入、利润率改善路径和风险。",
             "- 访谈客户、供应商或渠道伙伴，验证产品差异化与销售组织质量。",
             "- 跟踪竞争对手毛利率、研发强度与新品节奏，确认护城河是否扩大。",
             f"- 围绕“{analysis.security.thesis or analysis.security.name}”建立 3-5 个可证伪的季度观察指标。",
@@ -360,8 +375,8 @@ def _risk_notes(analysis: FisherAnalysis) -> str:
     notes = ["- 本报告为自动化初筛，不构成投资建议；评分用于组织尽调优先级，不应单独作为买卖依据。"]
     if analysis.errors:
         notes.append("- 部分数据源返回异常：" + "; ".join(_escape_md(error) for error in analysis.errors))
-    notes.append("- SEC 数据来自 EDGAR submissions/companyfacts（与 SEC EDGAR Search 同源）；XBRL 标签可能因公司披露口径不同而缺失或不可比。")
-    notes.append("- Yahoo/Nasdaq 公共接口字段可能滞后或缺失；关键结论需用公司公告与 SEC 文件复核。")
+    notes.append(f"- 披露数据来自 {analysis.sec_data.source or '公开披露页面'}；字段可能因公司披露口径不同而缺失或不可比。")
+    notes.append(f"- 行情/新闻/基本面公共接口可能滞后或缺失；当前行情来源：{analysis.quote.source or 'N/A'}，关键结论需用公司公告与原始披露文件复核。")
     return "\n".join(notes)
 
 
@@ -405,8 +420,18 @@ def _status_badge(status: str) -> str:
     return {"positive": "🟢 正面", "negative": "🔴 风险", "neutral": "⚪ 中性"}.get(status, "⚪ 中性")
 
 
-def _format_price(value: float | None) -> str:
-    return "N/A" if value is None else f"${value:,.2f}"
+def _filing_section_title(sec_data: SecFundamentalData) -> str:
+    source = sec_data.source or "公开披露"
+    if "SEC" in source:
+        return "SEC EDGAR 近一年财报数据"
+    return "大陆公告/年报索引"
+
+
+def _format_price(value: float | None, source: str = "") -> str:
+    if value is None:
+        return "N/A"
+    currency = "¥" if any(name in source for name in ("东方财富", "腾讯", "大陆")) else "$"
+    return f"{currency}{value:,.2f}"
 
 
 def _format_percent(value: float | None) -> str:

@@ -405,3 +405,50 @@ def test_build_fisher_markdown_poster_from_local_chatgpt_md(tmp_path):
     assert any(
         item.keyword == "研发费用" for item in analysis.annual_report_evidence.items
     )
+
+
+def test_write_fisher_markdown_poster_can_render_custom_template(tmp_path):
+    from stock_daily_report.fisher import (
+        build_fisher_analysis_from_markdown_reports,
+        write_fisher_markdown_poster,
+    )
+
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "analysis.md").write_text(
+        "营收增长，毛利率提升，经营现金流改善，但客户集中度需关注。",
+        encoding="utf-8",
+    )
+    template_path = tmp_path / "template.md"
+    template_path.write_text(
+        "# {{公司名称}}（{{Ticker}}）财报总结｜{{财报期间}}\n"
+        "- 文件：{{文件名 / 公司公告 / 10-K / 10-Q}}\n"
+        "- 现金流：{{经营现金流 / FCF 表现}}\n"
+        "- 未知：{{}}\n",
+        encoding="utf-8",
+    )
+
+    analysis = build_fisher_analysis_from_markdown_reports(
+        report_dir, "NVDA", name="NVIDIA"
+    )
+    poster_path = write_fisher_markdown_poster(
+        analysis, tmp_path / "out", template_path=template_path
+    )
+    poster = poster_path.read_text(encoding="utf-8")
+
+    assert "# NVIDIA（NVDA）财报总结｜待核验" in poster
+    assert "analysis.md" in poster
+    assert "经营现金流改善" in poster
+    assert "{{" not in poster
+    assert "待补充" in poster
+
+
+def test_default_markdown_poster_template_exists_and_is_readable():
+    from stock_daily_report.fisher import (
+        DEFAULT_MARKDOWN_POSTER_TEMPLATE,
+        read_markdown_poster_template,
+    )
+
+    template = read_markdown_poster_template(DEFAULT_MARKDOWN_POSTER_TEMPLATE)
+
+    assert "# {{公司名称}}（{{Ticker}}）财报总结｜{{财报期间}}" in template

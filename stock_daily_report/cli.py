@@ -13,6 +13,11 @@ from .fisher import (
     resolve_local_annual_report_dir,
     write_fisher_markdown,
 )
+from .pdf_reports import (
+    analyze_pdf_reports_with_chatgpt,
+    write_pdf_report_analysis_json,
+)
+from .poster import render_pdf_report_poster
 from .scheduler import run_forever, run_once
 
 
@@ -66,6 +71,36 @@ def main() -> None:
         ),
     )
 
+    pdf_parser = subparsers.add_parser(
+        "pdf-poster",
+        parents=[config_parent],
+        help="Use ChatGPT to analyze local PDF financial reports and render an SVG poster.",
+    )
+    pdf_parser.add_argument(
+        "symbol", help="Ticker symbol, for example NVDA or 600519.SH."
+    )
+    pdf_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        required=True,
+        help="Local directory containing PDF financial reports.",
+    )
+    pdf_parser.add_argument("--name", help="Optional company display name override.")
+    pdf_parser.add_argument(
+        "--thesis",
+        default="",
+        help="Optional investment thesis that guides ChatGPT extraction.",
+    )
+    pdf_parser.add_argument(
+        "--model",
+        help="OpenAI model for PDF analysis; defaults to OPENAI_MODEL or gpt-4.1-mini.",
+    )
+    pdf_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional output directory; defaults to outputs/<date>/pdf_reports/.",
+    )
+
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -92,6 +127,23 @@ def main() -> None:
         )
         markdown_path = write_fisher_markdown(analysis, output_dir)
         print(f"fisher_markdown={markdown_path}")
+    elif args.command == "pdf-poster":
+        analysis = analyze_pdf_reports_with_chatgpt(
+            args.report_dir,
+            args.symbol,
+            name=args.name,
+            thesis=args.thesis,
+            model=args.model,
+        )
+        output_dir = (
+            args.output_dir
+            or output_fisher_dir_for(settings, analysis.generated_at).parent
+            / "pdf_reports"
+        )
+        json_path = write_pdf_report_analysis_json(analysis, output_dir)
+        poster_path = render_pdf_report_poster(analysis, settings.poster, output_dir)
+        print(f"pdf_analysis={json_path}")
+        print(f"pdf_poster={poster_path}")
     else:
         run_forever(settings)
 

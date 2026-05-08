@@ -300,7 +300,9 @@ def test_resolve_local_annual_report_dir_matches_symbol_case_insensitively(tmp_p
     assert resolve_local_annual_report_dir("NVDA", input_root=input_root) == report_dir
 
 
-def test_resolve_local_annual_report_dir_defaults_to_project_input(tmp_path, monkeypatch):
+def test_resolve_local_annual_report_dir_defaults_to_project_input(
+    tmp_path, monkeypatch
+):
     from stock_daily_report.fisher import resolve_local_annual_report_dir
 
     report_dir = tmp_path / "input" / "nvda"
@@ -308,6 +310,50 @@ def test_resolve_local_annual_report_dir_defaults_to_project_input(tmp_path, mon
     monkeypatch.chdir(tmp_path)
 
     assert resolve_local_annual_report_dir("NVDA") == report_dir
+
+
+def test_build_fisher_analysis_defaults_to_project_input_symbol_dir_case_insensitively(
+    tmp_path, monkeypatch
+):
+    input_dir = tmp_path / "input"
+    report_dir = input_dir / "nvda"
+    report_dir.mkdir(parents=True)
+    (report_dir / "2025.md").write_text(
+        "年度报告：research 投入增加，经营现金流改善。", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_quote",
+        lambda symbol, app: Quote(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_company_profile",
+        lambda symbol, app: CompanyProfile(symbol, ""),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_fundamentals",
+        lambda symbol, app: FundamentalSnapshot(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_earnings",
+        lambda symbol, app: EarningsEvent(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_sec_fundamentals",
+        lambda symbol, app: SecFundamentalData(symbol),
+    )
+    monkeypatch.setattr(
+        "stock_daily_report.fisher.fetch_news",
+        lambda symbol, app, keywords, limit: [],
+    )
+
+    analysis = build_fisher_analysis(Settings(), "NVDA")
+
+    assert analysis.annual_report_evidence.directory == str(report_dir)
+    assert any(
+        file.status == "loaded" for file in analysis.annual_report_evidence.files
+    )
+
 
 def test_ascii_keyword_matching_uses_word_boundaries():
     from stock_daily_report.fisher import _score_fisher_criteria

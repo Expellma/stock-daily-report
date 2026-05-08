@@ -7,7 +7,7 @@
 - **关注列表日报**：读取 `config/watchlist.csv`，生成每个关注标的的价格表现、成交量、财报日历与高质量新闻摘要。
 - **标普 500 重大新闻**：读取 `config/sp500_symbols.csv`，批量扫描标普 500 相关重大新闻，并按关键词与时间排序。
 - **海报输出**：使用纯 SVG 模版生成海报，默认输出到 `outputs/YYYY-MM-DD/`。
-- **PDF 财报 ChatGPT 海报**：读取本地目录中的 PDF 财报，调用 ChatGPT 提取营收、利润、现金流、增长动因、风险与海报短句，并生成可发布的 SVG 财报海报。
+- **本地 Markdown 费雪海报**：读取目录中由 ChatGPT 预先分析财报后导出的 `.md` 文件，不再调用 GPT/API，离线生成费雪 15 问 Markdown 海报。
 - **本地定时**：内置 `scheduler` 命令，可按配置每天本地时间 08:00 自动执行；也提供 cron/systemd 示例。
 - **配置化**：运行时间、时区、输出目录、新闻关键词、请求超时、海报尺寸等均在 `config/settings.toml` 中配置。
 - **费雪成长投资分析**：对指定标的抓取公司画像、行情、近一年财报/公告索引、关键基本面、财报日期和高信号新闻；A 股使用大陆可访问的东方财富、巨潮资讯/交易所等公开数据源，美股保留 Yahoo/Nasdaq/SEC 兼容路径，按 Philip Fisher 15 问生成适合浏览与二次编辑的 Markdown。
@@ -71,30 +71,34 @@ stock-daily-report fisher 600519.SH --name 贵州茅台 --annual-report-dir /inp
 
 本地年报目录可通过 `--annual-report-dir` 指定；未传入时默认读取项目所在目录下的 `input/<标的名>`，其中 `<标的名>` 优先使用 `--name`，否则使用 `symbol`，并且目录名匹配会忽略大小写（例如 `NVDA` 可读取 `input/nvda`）。当前会直接解析 `.txt` / `.md` 年报片段，`.pdf` 会在报告中标记为暂不支持并继续生成报告。
 
-## ChatGPT 本地 PDF 财报海报
+## 本地 Markdown 费雪海报
 
-如果本地目录里的财报文件是 PDF，可使用 `pdf-poster` 命令直接让 ChatGPT 阅读 PDF 并把关键信息填入海报：
+当 OpenAI API 暂无余额或不希望联网时，可先在 ChatGPT 中手动分析财报，把结果保存为 `.md` 文件，然后让本项目离线读取这些 Markdown 内容并输出费雪分析海报：
 
 ```bash
-export OPENAI_API_KEY=你的_OpenAI_API_Key
-stock-daily-report pdf-poster 600519.SH \
+stock-daily-report md-poster 600519.SH \
   --name 贵州茅台 \
   --report-dir input/贵州茅台 \
   --thesis "高端白酒需求与现金流质量"
 ```
 
+兼容旧命令名 `pdf-poster`，但当前实现同样读取目录中的 Markdown 文件并输出 Markdown 海报，不会再调用 OpenAI Responses API：
+
+```bash
+stock-daily-report pdf-poster 600519.SH --name 贵州茅台 --report-dir input/贵州茅台
+```
+
 可选参数：
 
-- `--model`：指定 OpenAI 模型；默认读取 `OPENAI_MODEL`，未设置时使用 `gpt-4.1-mini`。
-- `--output-dir`：指定输出目录；默认写入 `outputs/<date>/pdf_reports/`。
-- `--report-dir`：必填，目录中会按文件名顺序读取最多 4 个 `.pdf` 文件，单个文件默认限制 25MB。
+- `--output-dir`：指定输出目录；默认写入 `outputs/<date>/md_reports/`。
+- `--report-dir`：必填，目录中会按文件名顺序读取 `.md` / `.txt` 文件；`.pdf` 会标记为暂不支持并继续生成。
+- `--thesis`：可选投资主线，会展示在海报结论中。
 
 生成结果：
 
-- `outputs/<date>/pdf_reports/<symbol>_pdf_report_analysis.json`：ChatGPT 结构化提取结果，便于审计和二次编辑。
-- `outputs/<date>/pdf_reports/<symbol>_pdf_report_poster.svg`：填入财报关键数据、增长动因、主要风险、来源与模型信息的 SVG 海报。
+- `outputs/<date>/md_reports/<symbol>_fisher_poster.md`：基于本地 Markdown 财报分析内容生成的费雪 15 问 Markdown 海报，包含海报结论、强项信号、风险/待核验项、关键证据、评分矩阵与输入文件读取状态。
 
-> 该功能需要联网调用 OpenAI Responses API，并要求设置 `OPENAI_API_KEY`；ChatGPT 被要求只基于 PDF 披露内容输出，无法确认的信息会标记为“待核验”。
+> 该功能不要求 `OPENAI_API_KEY`，也不会消耗 GPT API 余额；输入文件应是你已经通过 ChatGPT 或人工方式完成财报分析后的 Markdown 输出。
 
 支持的 A 股代码格式包括 `600000.SH`、`000001.SZ`、`430047.BJ` 以及纯 6 位代码。纯 6 位代码会按常见号段推断交易所：`5/6/9` 开头归为上交所，`0/1/2/3` 开头归为深交所，`4/8` 开头归为北交所。识别为 A 股后，费雪链路不会调用 Yahoo Finance、Nasdaq 或 SEC EDGAR，而是使用以下大陆可访问公开数据源适配层：
 

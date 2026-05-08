@@ -26,10 +26,13 @@ from .models import (
     AnnualReportEvidence,
     AnnualReportEvidenceItem,
     AnnualReportFile,
+    CompanyProfile,
     FisherAnalysis,
     FisherCriterion,
     FundamentalMetric,
+    FundamentalSnapshot,
     NewsItem,
+    Quote,
     SecFactPoint,
     SecFundamentalData,
     Security,
@@ -303,6 +306,57 @@ def output_fisher_dir_for(settings: Settings, generated_at: datetime) -> Path:
     return output_dir_for(settings, generated_at) / "fisher"
 
 
+def build_fisher_analysis_from_markdown_reports(
+    report_dir: Path,
+    symbol: str,
+    name: str | None = None,
+    thesis: str = "",
+) -> FisherAnalysis:
+    """Build an offline Fisher analysis from local ChatGPT Markdown report files.
+
+    This path intentionally avoids live market-data and LLM API calls. It treats
+    Markdown files in ``report_dir`` as already-reviewed financial-report notes,
+    extracts keyword evidence from them, and scores the Fisher framework from
+    that evidence only.
+    """
+
+    normalized_symbol = symbol.upper()
+    company_name = name or normalized_symbol
+    evidence = load_local_annual_reports(report_dir)
+    local_source = "本地 ChatGPT Markdown 财报分析"
+    return FisherAnalysis(
+        generated_at=datetime.now(timezone.utc),
+        security=Security(normalized_symbol, company_name, thesis),
+        quote=Quote(normalized_symbol, source=local_source),
+        profile=CompanyProfile(
+            normalized_symbol,
+            company_name,
+            source=local_source,
+            summary=_combined_markdown_summary(evidence),
+        ),
+        fundamentals=FundamentalSnapshot(normalized_symbol, source=local_source),
+        criteria=_score_fisher_criteria(
+            "",
+            [],
+            [],
+            SecFundamentalData(normalized_symbol, source=local_source),
+            evidence,
+        ),
+        sec_data=SecFundamentalData(normalized_symbol, source=local_source),
+        annual_report_evidence=evidence,
+        errors=evidence.warnings.copy(),
+    )
+
+
+def write_fisher_markdown_poster(analysis: FisherAnalysis, output_dir: Path) -> Path:
+    """Persist a concise Markdown poster for an offline Fisher analysis."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"{analysis.security.symbol.lower()}_fisher_poster.md"
+    path.write_text(render_fisher_markdown_poster(analysis), encoding="utf-8")
+    return path
+
+
 def resolve_local_annual_report_dir(
     symbol: str,
     name: str | None = None,
@@ -492,6 +546,61 @@ def render_fisher_markdown(analysis: FisherAnalysis) -> str:
         "## ⚠️ 数据限制与风险提示",
         "",
         _risk_notes(analysis),
+        "",
+    ]
+    return "\n".join(sections)
+
+
+def render_fisher_markdown_poster(analysis: FisherAnalysis) -> str:
+    """Render a concise Markdown poster from offline Fisher analysis results."""
+
+    score = _overall_score(analysis.criteria)
+    source_files = [file.path for file in analysis.annual_report_evidence.files]
+    source_line = "、".join(Path(path).name for path in source_files) or "未发现可读取文件"
+    top_positive = [item for item in analysis.criteria if (item.score or 0) >= 4]
+    top_risk = [item for item in analysis.criteria if (item.score or 0) <= 2]
+    evidence_items = analysis.annual_report_evidence.items[:8]
+    thesis = analysis.security.thesis or "基于本地 Markdown 财报分析内容进行费雪框架初筛。"
+
+    sections = [
+        f"# {analysis.security.name}（{analysis.security.symbol}）费雪分析 Markdown 海报",
+        "",
+        f"> 生成时间：{analysis.generated_at.isoformat()} · 输入：{source_line} · 数据源：本地 Markdown（不调用 GPT/API）",
+        "",
+        "## 🧭 海报结论",
+        "",
+        f"- **综合评分：{score}/5**",
+        f"- **投资主线：** {thesis}",
+        f"- **一句话判断：** {_summary_callout(score).lstrip('> ')}",
+        "",
+        "## ✅ 费雪强项信号",
+        "",
+        _poster_criteria_bullets(
+            top_positive,
+            fallback="暂未在 Markdown 中提取到明显强项；建议补充更完整的财报分析结论。",
+        ),
+        "",
+        "## ⚠️ 主要风险/待核验",
+        "",
+        _poster_criteria_bullets(
+            top_risk,
+            fallback="暂未在 Markdown 中提取到显著风险；仍需核验管理层、竞争格局与现金流质量。",
+        ),
+        "",
+        "## 🔎 来自输入 Markdown 的关键证据",
+        "",
+        _poster_evidence_bullets(evidence_items),
+        "",
+        "## 🐟 费雪 15 问评分矩阵",
+        "",
+        _criteria_table(analysis.criteria),
+        "",
+        "## 📁 输入文件读取状态",
+        "",
+        _annual_report_section(analysis.annual_report_evidence),
+        "",
+        "---",
+        "仅供研究参考，不构成投资建议；本海报只基于目录内 Markdown 内容生成，未联网抓取行情或重新调用 GPT。",
         "",
     ]
     return "\n".join(sections)
@@ -982,6 +1091,41 @@ def _risk_notes(analysis: FisherAnalysis) -> str:
         f"- 行情/新闻/基本面公共接口可能滞后或缺失；当前行情来源：{analysis.quote.source or 'N/A'}，关键结论需用公司公告与原始披露文件复核。"
     )
     return "\n".join(notes)
+
+
+def _combined_markdown_summary(evidence: AnnualReportEvidence) -> str:
+    excerpts = [item.excerpt for item in evidence.items[:6]]
+    return textwrap.shorten(" ".join(excerpts), width=300, placeholder="...")
+
+
+def _poster_criteria_bullets(
+    criteria: list[FisherCriterion], *, fallback: str
+) -> str:
+    if not criteria:
+        return f"- {fallback}"
+    lines: list[str] = []
+    for criterion in criteria[:5]:
+        evidence = (
+            criterion.evidence[0]
+            if criterion.evidence
+            else "证据不足，需继续核验。"
+        )
+        lines.append(
+            f"- **{criterion.number}. {criterion.title}**："
+            f"{criterion.assessment}（{criterion.score}/5）— {evidence}"
+        )
+    return "\n".join(lines)
+
+
+def _poster_evidence_bullets(items: list[AnnualReportEvidenceItem]) -> str:
+    if not items:
+        return (
+            "- 未提取到关键词证据；请确认目录中存在非空 .md 文件，"
+            "且内容包含财报分析结论。"
+        )
+    return "\n".join(
+        f"- **{item.keyword}**（{item.source_file}）：{item.excerpt}" for item in items
+    )
 
 
 def _summary_callout(score: int) -> str:

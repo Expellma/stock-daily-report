@@ -367,3 +367,41 @@ def test_ascii_keyword_matching_uses_word_boundaries():
 
     assert criteria_by_number[2].score == 3
     assert criteria_by_number[15].score == 3
+
+
+def test_build_fisher_markdown_poster_from_local_chatgpt_md(tmp_path):
+    from stock_daily_report.fisher import (
+        build_fisher_analysis_from_markdown_reports,
+        write_fisher_markdown_poster,
+    )
+
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    (report_dir / "chatgpt_analysis.md").write_text(
+        """
+# ChatGPT 财报分析
+
+公司通过 AI 平台和新产品扩张市场份额，研发费用持续增加。
+毛利率提升，经营现金流改善，但客户集中度和存货增加仍需关注。
+品牌、供应链和规模优势构成护城河。
+""".strip(),
+        encoding="utf-8",
+    )
+
+    analysis = build_fisher_analysis_from_markdown_reports(
+        report_dir,
+        "NVDA",
+        name="NVIDIA",
+        thesis="AI 平台扩张",
+    )
+    poster_path = write_fisher_markdown_poster(analysis, tmp_path / "out")
+    poster = poster_path.read_text(encoding="utf-8")
+
+    assert poster_path.name == "nvda_fisher_poster.md"
+    assert "NVIDIA（NVDA）费雪分析 Markdown 海报" in poster
+    assert "本地 Markdown（不调用 GPT/API）" in poster
+    assert "chatgpt_analysis.md" in poster
+    assert "费雪 15 问评分矩阵" in poster
+    assert any(
+        item.keyword == "研发费用" for item in analysis.annual_report_evidence.items
+    )

@@ -8,16 +8,13 @@ from pathlib import Path
 
 from .config import load_settings
 from .fisher import (
+    build_fisher_analysis_from_markdown_reports,
     build_fisher_analysis,
     output_fisher_dir_for,
     resolve_local_annual_report_dir,
     write_fisher_markdown,
+    write_fisher_markdown_poster,
 )
-from .pdf_reports import (
-    analyze_pdf_reports_with_chatgpt,
-    write_pdf_report_analysis_json,
-)
-from .poster import render_pdf_report_poster
 from .scheduler import run_forever, run_once
 
 
@@ -74,7 +71,7 @@ def main() -> None:
     pdf_parser = subparsers.add_parser(
         "pdf-poster",
         parents=[config_parent],
-        help="Use ChatGPT to analyze local PDF financial reports and render an SVG poster.",
+        help="Read local Markdown financial-report analyses and render a Fisher Markdown poster.",
     )
     pdf_parser.add_argument(
         "symbol", help="Ticker symbol, for example NVDA or 600519.SH."
@@ -83,22 +80,48 @@ def main() -> None:
         "--report-dir",
         type=Path,
         required=True,
-        help="Local directory containing PDF financial reports.",
+        help="Local directory containing Markdown files exported from ChatGPT financial-report analysis.",
     )
     pdf_parser.add_argument("--name", help="Optional company display name override.")
     pdf_parser.add_argument(
         "--thesis",
         default="",
-        help="Optional investment thesis that guides ChatGPT extraction.",
+        help="Optional investment thesis shown in the Fisher Markdown poster.",
     )
     pdf_parser.add_argument(
         "--model",
-        help="OpenAI model for PDF analysis; defaults to OPENAI_MODEL or gpt-4.1-mini.",
+        help=argparse.SUPPRESS,
     )
     pdf_parser.add_argument(
         "--output-dir",
         type=Path,
-        help="Optional output directory; defaults to outputs/<date>/pdf_reports/.",
+        help="Optional output directory; defaults to outputs/<date>/md_reports/.",
+    )
+
+    md_parser = subparsers.add_parser(
+        "md-poster",
+        parents=[config_parent],
+        help="Read local Markdown financial-report analyses and render a Fisher Markdown poster.",
+    )
+    md_parser.add_argument(
+        "symbol", help="Ticker symbol, for example NVDA or 600519.SH."
+    )
+    md_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        required=True,
+        help="Local directory containing Markdown files exported from ChatGPT financial-report analysis.",
+    )
+    md_parser.add_argument("--name", help="Optional company display name override.")
+    md_parser.add_argument(
+        "--thesis",
+        default="",
+        help="Optional investment thesis shown in the Fisher Markdown poster.",
+    )
+    md_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional output directory; defaults to outputs/<date>/md_reports/.",
     )
 
     args = parser.parse_args()
@@ -127,23 +150,20 @@ def main() -> None:
         )
         markdown_path = write_fisher_markdown(analysis, output_dir)
         print(f"fisher_markdown={markdown_path}")
-    elif args.command == "pdf-poster":
-        analysis = analyze_pdf_reports_with_chatgpt(
+    elif args.command in {"pdf-poster", "md-poster"}:
+        analysis = build_fisher_analysis_from_markdown_reports(
             args.report_dir,
             args.symbol,
             name=args.name,
             thesis=args.thesis,
-            model=args.model,
         )
         output_dir = (
             args.output_dir
             or output_fisher_dir_for(settings, analysis.generated_at).parent
-            / "pdf_reports"
+            / "md_reports"
         )
-        json_path = write_pdf_report_analysis_json(analysis, output_dir)
-        poster_path = render_pdf_report_poster(analysis, settings.poster, output_dir)
-        print(f"pdf_analysis={json_path}")
-        print(f"pdf_poster={poster_path}")
+        poster_path = write_fisher_markdown_poster(analysis, output_dir)
+        print(f"fisher_markdown_poster={poster_path}")
     else:
         run_forever(settings)
 

@@ -148,6 +148,9 @@ ANNUAL_REPORT_KEYWORDS = tuple(
 )
 SUPPORTED_ANNUAL_REPORT_SUFFIXES = {".txt", ".md", ".pdf"}
 
+DEFAULT_MARKDOWN_POSTER_TEMPLATE = Path("input/templates/财报总结统一模板.md")
+
+
 FINANCIAL_QUALITY_NEGATIVE_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -348,13 +351,36 @@ def build_fisher_analysis_from_markdown_reports(
     )
 
 
-def write_fisher_markdown_poster(analysis: FisherAnalysis, output_dir: Path) -> Path:
-    """Persist a concise Markdown poster for an offline Fisher analysis."""
+def write_fisher_markdown_poster(
+    analysis: FisherAnalysis, output_dir: Path, template_path: Path | None = None
+) -> Path:
+    """Persist a Markdown poster for an offline Fisher analysis.
+
+    When ``template_path`` is provided, the poster is rendered by reading that
+    Markdown template and filling supported ``{{...}}`` placeholders. Without a
+    template path this keeps the legacy concise Fisher poster renderer.
+    """
 
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"{analysis.security.symbol.lower()}_fisher_poster.md"
-    path.write_text(render_fisher_markdown_poster(analysis), encoding="utf-8")
+    if template_path is None:
+        markdown = render_fisher_markdown_poster(analysis)
+    else:
+        markdown = render_fisher_markdown_poster_from_template(
+            analysis, read_markdown_poster_template(template_path)
+        )
+    path.write_text(markdown, encoding="utf-8")
     return path
+
+
+def read_markdown_poster_template(template_path: Path) -> str:
+    """Read a Markdown poster template from disk with a clear error message."""
+
+    if not template_path.exists():
+        raise FileNotFoundError(f"Markdown 海报模板不存在：{template_path}")
+    if not template_path.is_file():
+        raise IsADirectoryError(f"Markdown 海报模板不是文件：{template_path}")
+    return template_path.read_text(encoding="utf-8")
 
 
 def resolve_local_annual_report_dir(
@@ -604,6 +630,175 @@ def render_fisher_markdown_poster(analysis: FisherAnalysis) -> str:
         "",
     ]
     return "\n".join(sections)
+
+
+def render_fisher_markdown_poster_from_template(
+    analysis: FisherAnalysis, template_text: str
+) -> str:
+    """Render the offline Markdown poster by filling a user-provided template."""
+
+    replacements = _markdown_poster_template_replacements(analysis)
+
+    def replace_placeholder(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        if key in replacements:
+            return replacements[key]
+        return _default_template_placeholder_value(key)
+
+    return re.sub(r"\{\{([^{}]*)\}\}", replace_placeholder, template_text)
+
+
+def _markdown_poster_template_replacements(analysis: FisherAnalysis) -> dict[str, str]:
+    score = _overall_score(analysis.criteria)
+    source_files = [file.path for file in analysis.annual_report_evidence.files]
+    source_line = "、".join(Path(path).name for path in source_files) or "未发现可读取文件"
+    summary = _summary_callout(score).lstrip("> ")
+    evidence_texts = [item.excerpt for item in analysis.annual_report_evidence.items]
+    risk_criteria = [item for item in analysis.criteria if (item.score or 0) <= 2]
+    positive_criteria = [item for item in analysis.criteria if (item.score or 0) >= 4]
+    generated_date = analysis.generated_at.strftime("%Y-%m-%d")
+    generated_year = analysis.generated_at.strftime("%Y")
+
+    return {
+        "公司名称": analysis.security.name,
+        "Ticker": analysis.security.symbol,
+        "财报期间": "待核验",
+        "10-K / 10-Q / 年报 / 季报 / 财报新闻稿": "本地 Markdown 财报分析",
+        "FY / Q": "待核验",
+        "年份": generated_year,
+        "日期": generated_date,
+        "文件名 / 公司公告 / 10-K / 10-Q": source_line,
+        (
+            "超预期 / 符合预期 / 低于预期 / 质量改善 / 质量恶化 / "
+            "增长放缓但现金流强 / 增长强劲但估值透支"
+        ): _template_quality_label(score),
+        "强化 / 维持 / 边际转弱 / 被破坏 / 需观察": _template_logic_status(score),
+        (
+            "收入驱动 / 利润率驱动 / 现金流驱动 / "
+            "非经常性收益驱动 / 周期修复驱动"
+        ): _template_main_driver(evidence_texts),
+        "本期最重要的基本面变化": _first_non_empty(evidence_texts, summary),
+        "关键风险或变量": _criteria_template_summary(
+            risk_criteria,
+            "未在输入 Markdown 中提取到明确风险，仍需核验竞争、现金流与治理。",
+        ),
+        "收入增速与趋势": _keyword_template_summary(
+            evidence_texts, ("收入", "营收", "revenue")
+        ),
+        "毛利率 / 营业利润率变化": _keyword_template_summary(
+            evidence_texts, ("毛利率", "营业利润率", "gross margin", "margin")
+        ),
+        "经营现金流 / FCF 表现": _keyword_template_summary(
+            evidence_texts, ("经营现金流", "自由现金流", "cash flow", "fcf")
+        ),
+        "现金、债务、流动性": _keyword_template_summary(
+            evidence_texts, ("现金", "债务", "流动性", "debt", "liquidity")
+        ),
+        "回购、分红、并购、再投资": _keyword_template_summary(
+            evidence_texts,
+            ("回购", "分红", "并购", "再投资", "repurchase", "dividend"),
+        ),
+        "管理层指引或展望": _keyword_template_summary(
+            evidence_texts, ("指引", "展望", "guidance", "outlook")
+        ),
+        "投资逻辑状态": _template_logic_status(score),
+        "低估 / 大致合理 / 透支预期 / 明显高估 / 数据不足": "数据不足",
+        (
+            "观察仓 / 试探仓 / 分批建仓 / 核心仓等待 / 不追价 / 等回撤"
+        ): _template_position_suggestion(score),
+        "利润表 / 资产负债表 / 现金流量表 / 附注页码": source_line,
+        "一句话总结": summary,
+        "观察 / 试探 / 分批 / 持有 / 不追 / 等回撤": _template_short_action(score),
+        "验证点 1": _criteria_template_summary(
+            positive_criteria[:1], "收入增长、利润率和现金流质量是否继续兑现。"
+        ),
+        "验证点 2": _criteria_template_summary(
+            risk_criteria[:1], "主要风险是否在下一期财报中缓解。"
+        ),
+        "验证点 3": "补充管理层交流、行业数据和估值敏感性分析。",
+    }
+
+
+def _template_quality_label(score: float) -> str:
+    if score >= 4:
+        return "质量改善"
+    if score <= 2:
+        return "质量恶化"
+    return "符合预期"
+
+
+def _template_logic_status(score: float) -> str:
+    if score >= 4:
+        return "强化"
+    if score <= 2:
+        return "边际转弱"
+    return "维持"
+
+
+def _template_position_suggestion(score: float) -> str:
+    if score >= 4:
+        return "分批建仓"
+    if score <= 2:
+        return "不追价"
+    return "观察仓"
+
+
+def _template_short_action(score: float) -> str:
+    if score >= 4:
+        return "分批"
+    if score <= 2:
+        return "不追"
+    return "观察"
+
+
+def _template_main_driver(evidence_texts: list[str]) -> str:
+    lowered = "\n".join(evidence_texts).lower()
+    if any(
+        keyword in lowered for keyword in ("经营现金流", "自由现金流", "cash flow", "fcf")
+    ):
+        return "现金流驱动"
+    if any(keyword in lowered for keyword in ("毛利率", "利润率", "margin")):
+        return "利润率驱动"
+    if any(keyword in lowered for keyword in ("收入", "营收", "revenue")):
+        return "收入驱动"
+    return "数据不足"
+
+
+def _criteria_template_summary(criteria: list[FisherCriterion], fallback: str) -> str:
+    if not criteria:
+        return fallback
+    parts = []
+    for criterion in criteria[:3]:
+        evidence = criterion.evidence[0] if criterion.evidence else "待核验"
+        parts.append(f"{criterion.title}（{criterion.score or 'N/A'}/5）：{evidence}")
+    return "；".join(parts)
+
+
+def _keyword_template_summary(texts: list[str], keywords: tuple[str, ...]) -> str:
+    for text in texts:
+        normalized = text.lower()
+        if any(keyword.lower() in normalized for keyword in keywords):
+            return text
+    return "数据缺失，需回到原始财报或输入 Markdown 补充。"
+
+
+def _first_non_empty(values: list[str], fallback: str) -> str:
+    for value in values:
+        if value.strip():
+            return value
+    return fallback
+
+
+def _default_template_placeholder_value(key: str) -> str:
+    if not key:
+        return "待补充"
+    if "数据缺失" in key:
+        return "数据缺失"
+    if "有 / 无" in key:
+        return "数据缺失"
+    if "高 / 中 / 低" in key or "强 / 中 / 弱" in key:
+        return "数据缺失"
+    return f"待核验：{key}"
 
 
 def _score_fisher_criteria(

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .config import load_settings
 from .fisher import (
+    DEFAULT_MARKDOWN_POSTER_TEMPLATE,
     build_fisher_analysis_from_markdown_reports,
     build_fisher_analysis,
     output_fisher_dir_for,
@@ -86,7 +87,7 @@ def main() -> None:
     pdf_parser.add_argument(
         "--thesis",
         default="",
-        help="Optional investment thesis shown in the Fisher Markdown poster.",
+        help="Optional investment thesis kept with the offline Markdown analysis.",
     )
     pdf_parser.add_argument(
         "--model",
@@ -101,7 +102,10 @@ def main() -> None:
     md_parser = subparsers.add_parser(
         "md-poster",
         parents=[config_parent],
-        help="Read local Markdown financial-report analyses and render a Fisher Markdown poster.",
+        help=(
+            "Read local Markdown financial-report analyses and render a "
+            "template-based Markdown poster."
+        ),
     )
     md_parser.add_argument(
         "symbol", help="Ticker symbol, for example NVDA or 600519.SH."
@@ -116,7 +120,16 @@ def main() -> None:
     md_parser.add_argument(
         "--thesis",
         default="",
-        help="Optional investment thesis shown in the Fisher Markdown poster.",
+        help="Optional investment thesis kept with the offline Markdown analysis.",
+    )
+    md_parser.add_argument(
+        "--template",
+        type=Path,
+        default=DEFAULT_MARKDOWN_POSTER_TEMPLATE,
+        help=(
+            "Markdown output template; defaults to "
+            "input/templates/财报总结统一模板.md."
+        ),
     )
     md_parser.add_argument(
         "--output-dir",
@@ -162,7 +175,10 @@ def main() -> None:
             or output_fisher_dir_for(settings, analysis.generated_at).parent
             / "md_reports"
         )
-        poster_path = write_fisher_markdown_poster(analysis, output_dir)
+        template_path = args.template if args.command == "md-poster" else None
+        poster_path = write_fisher_markdown_poster(
+            analysis, output_dir, template_path=template_path
+        )
         print(f"fisher_markdown_poster={poster_path}")
     else:
         run_forever(settings)

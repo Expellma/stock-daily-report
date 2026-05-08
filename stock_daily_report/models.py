@@ -158,6 +158,29 @@ class FisherAnalysis:
 
 
 @dataclass
+class PdfReportAnalysis:
+    generated_at: datetime
+    symbol: str
+    company_name: str
+    period: str
+    title: str
+    subtitle: str
+    verdict: str
+    revenue: str
+    profit: str
+    cash_flow: str
+    margins: str
+    growth_drivers: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    poster_bullets: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    disclaimer: str = "仅供研究参考，不构成投资建议。"
+    report_dir: str = ""
+    files: list[str] = field(default_factory=list)
+    model: str = ""
+
+
+@dataclass
 class SecurityDigest:
     security: Security
     quote: Quote
